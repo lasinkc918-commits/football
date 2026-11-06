@@ -134,6 +134,8 @@ interface MyTeamAndMarketProps {
     coinsAdded: number;
     playerToUnlock?: FootballPlayer;
   }) => void;
+  onNegotiatePlayer?: (player: FootballPlayer) => void;
+  onSellPlayer?: (player: FootballPlayer) => void;
 }
 
 const RARITY_COLORS: Record<PlayerRarity, string> = {
@@ -168,6 +170,8 @@ export const MyTeamAndMarket: React.FC<MyTeamAndMarketProps> = ({
   onSpinRoulette,
   onPlayDreamTeamOffline,
   onTriggerPaymentCheckout,
+  onNegotiatePlayer,
+  onSellPlayer,
 }) => {
   const playersPool = allPlayers && allPlayers.length > 0 ? allPlayers : PLAYERS_DB;
   const [section, setSection] = useState<
@@ -1961,23 +1965,48 @@ export const MyTeamAndMarket: React.FC<MyTeamAndMarketProps> = ({
                               <Check className="w-4 h-4" /> IN STARTING XI ({FORMATIONS[userFormation][userSquad.slice(0, 11).findIndex((s) => s.id === player.id)]?.label || player.position})
                             </button>
                           ) : (
-                            <button
-                              onClick={() => {
-                                const bestIdx = findBestSlotIndexForPlayer(
-                                  player,
-                                  userFormation,
-                                  userSquad
-                                );
-                                handleAssignUnlockedPlayerToSlot(player, bestIdx);
-                                setSection('my_team');
-                              }}
-                              className="w-full py-2.5 bg-white/10 hover:bg-[#10B981] text-white hover:text-[#070A0E] border border-white/15 rounded-xl font-display font-bold text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-                            >
-                              <Check className="w-4 h-4" /> OWNED · PLACE AT {FORMATIONS[userFormation][findBestSlotIndexForPlayer(player, userFormation, userSquad)]?.label || player.position}
-                            </button>
-                          )
-                        ) : (
+                            <div className="space-y-1.5">
+                              <button
+                                onClick={() => {
+                                  const bestIdx = findBestSlotIndexForPlayer(
+                                    player,
+                                    userFormation,
+                                    userSquad
+                                  );
+                                  handleAssignUnlockedPlayerToSlot(player, bestIdx);
+                                  setSection('my_team');
+                                }}
+                                className="w-full py-2.5 bg-white/10 hover:bg-[#10B981] text-white hover:text-[#070A0E] border border-white/15 rounded-xl font-display font-bold text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                              >
+                                <Check className="w-4 h-4" /> OWNED · PLACE AT {FORMATIONS[userFormation][findBestSlotIndexForPlayer(player, userFormation, userSquad)]?.label || player.position}
+                              </button>
+                              {onSellPlayer && (
+                                <button
+                                  onClick={() => {
+                                    SoundEngine.playUIClick();
+                                    onSellPlayer(player);
+                                  }}
+                                  className="w-full py-1.5 rounded-xl bg-rose-950/40 hover:bg-rose-900/50 border border-rose-500/30 text-rose-300 font-display font-bold text-[11px] transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                                >
+                                  <ArrowLeftRight className="w-3.5 h-3.5 text-rose-400" />
+                                  NEGOTIATE TRANSFER SALE
+                                </button>
+                              )}
+                            </div>
+                          )) : (
                           <div className="space-y-1.5">
+                            {onNegotiatePlayer && (
+                              <button
+                                onClick={() => {
+                                  SoundEngine.playUIClick();
+                                  onNegotiatePlayer(player);
+                                }}
+                                className="w-full py-2 rounded-xl bg-purple-950/60 hover:bg-purple-900/80 border border-purple-500/50 text-purple-200 font-display font-bold text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-sm shadow-purple-500/10"
+                              >
+                                <ArrowLeftRight className="w-3.5 h-3.5 text-purple-400" />
+                                🤝 NEGOTIATE TRANSFER & WAGES
+                              </button>
+                            )}
                             {/* BUY WITH IN-GAME WALLET RUPEES (₹) */}
                             <button
                               onClick={() => handlePurchasePlayerWithWalletRupees(player)}

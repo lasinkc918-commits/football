@@ -16,9 +16,25 @@ import {
   Wifi,
   WifiOff,
   Zap,
+  CloudRain,
+  Snowflake,
+  CloudFog,
+  CloudLightning,
+  Sun,
+  Sliders,
+  Tv,
+  MessageSquare,
+  AlertTriangle,
+  ArrowUpDown,
+  Sparkles,
 } from 'lucide-react';
 import { OpponentSquadInfo, OpponentSquadPopup } from './OpponentSquadPopup';
 import { PlayerPhotoAvatar } from './PlayerPhotoAvatar';
+import { VAROverlay, VARReviewState } from './VAROverlay';
+import { MatchIntroOverlay } from './MatchIntroOverlay';
+import { PostMatchInterviewModal } from './PostMatchInterviewModal';
+import { Commentary } from '../services/CommentaryEngine';
+import { RecordsManager } from '../services/RecordsAndAchievementsService';
 import {
   CelebrationType,
   FootballPlayer,
@@ -210,6 +226,25 @@ export const MatchViewport3D: React.FC<MatchViewport3DProps> = ({
   const [reconnecting, setReconnecting] = useState(false);
   const [latencyMs, setLatencyMs] = useState(18);
 
+  // Advanced Feature States
+  const [showMatchIntro, setShowMatchIntro] = useState<boolean>(() => mode === 'world_cup' || mode === 'tournament' || mode === 'quick_match');
+  const [varState, setVarState] = useState<VARReviewState>({
+    isActive: false,
+    incidentType: 'goal',
+    playerInvolved: '',
+    teamInvolved: 'home',
+    teamName: '',
+    reviewStep: 'alert',
+  });
+  const [showPostMatchInterview, setShowPostMatchInterview] = useState<boolean>(false);
+  const [activeWeather, setActiveWeather] = useState<WeatherType>(weather);
+  const [freeKickCurveX, setFreeKickCurveX] = useState<number>(0);
+  const [freeKickCurveZ, setFreeKickCurveZ] = useState<number>(0);
+  const [penaltyMindGame, setPenaltyMindGame] = useState<'normal' | 'stutter' | 'panenka'>('normal');
+  const [quickSubOpen, setQuickSubOpen] = useState<boolean>(false);
+  const [activeInjuryNotice, setActiveInjuryNotice] = useState<{ player: string; isSevere: boolean } | null>(null);
+  const [commentaryMuted, setCommentaryMuted] = useState<boolean>(false);
+
   const [hud, setHud] = useState<MatchHUDState>({
     homeScore: 0,
     awayScore: 0,
@@ -330,6 +365,22 @@ export const MatchViewport3D: React.FC<MatchViewport3DProps> = ({
         : undefined,
       onHUDUpdate: (nextHud) => {
         setHud(nextHud);
+      },
+      onVARTriggered: (incident, player, team) => {
+        setVarState({
+          isActive: true,
+          incidentType: incident,
+          playerInvolved: player,
+          teamInvolved: team,
+          teamName: team === 'home' ? homeTeam.name : awayTeam.name,
+          decision: incident === 'goal' ? 'GOAL CONFIRMED' : 'PENALTY AWARDED',
+          reviewStep: 'alert',
+        });
+        RecordsManager.updateAchievementProgress('var_survivor', 1);
+      },
+      onInjuryTriggered: (player, isSevere) => {
+        setActiveInjuryNotice({ player: player.name, isSevere });
+        Commentary.triggerInjury(player.name, isSevere);
       },
     });
 
@@ -687,17 +738,17 @@ export const MatchViewport3D: React.FC<MatchViewport3DProps> = ({
           )}
 
           {/* Top-Right Camera Switcher & Streamlined Broadcast Quick Actions */}
-          <div className="pointer-events-auto flex items-center gap-2">
+          <div className="pointer-events-auto flex flex-wrap items-center gap-2">
             {/* Camera Selector */}
             <div className="flex items-center bg-[#070A0E]/90 backdrop-blur-md border border-white/15 rounded-xl p-1 shadow-lg">
               <Camera className="w-3.5 h-3.5 text-slate-400 ml-2 mr-1" />
-              {(['Broadcast', 'Player', 'Action'] as CameraMode[]).map((cam) => (
+              {(['Broadcast', 'Goal', 'Player', 'Cinematic', 'Tactical'] as CameraMode[]).map((cam) => (
                 <button
                   key={cam}
                   onClick={() => handleCameraSwitch(cam)}
-                  className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap ${
+                  className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
                     hud.cameraMode === cam
-                      ? 'bg-[#10B981] text-[#070A0E]'
+                      ? 'bg-[#10B981] text-[#070A0E] font-bold'
                       : 'text-slate-300 hover:text-white'
                   }`}
                 >
@@ -705,6 +756,79 @@ export const MatchViewport3D: React.FC<MatchViewport3DProps> = ({
                 </button>
               ))}
             </div>
+
+            {/* Weather Selector */}
+            <div className="flex items-center bg-[#070A0E]/90 backdrop-blur-md border border-white/15 rounded-xl p-1 shadow-lg">
+              {(['Sunny', 'Rain', 'Snow', 'Fog', 'Thunderstorm'] as WeatherType[]).map((wth) => (
+                <button
+                  key={wth}
+                  onClick={() => {
+                    setActiveWeather(wth);
+                    engineRef.current?.setWeather(wth);
+                  }}
+                  className={`px-2 py-1 text-[11px] font-mono rounded-lg transition-all cursor-pointer ${
+                    activeWeather === wth
+                      ? 'bg-cyan-500 text-slate-950 font-bold'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                  title={`Switch Weather: ${wth}`}
+                >
+                  {wth === 'Sunny' ? '☀️' : wth === 'Rain' ? '🌧️' : wth === 'Snow' ? '❄️' : wth === 'Fog' ? '🌫️' : '⚡'}
+                </button>
+              ))}
+            </div>
+
+            {/* Smart AI Tactic HUD Pill */}
+            {hud.smartAITactic && (
+              <div className="px-2.5 py-1 rounded-xl bg-slate-900/90 border border-cyan-500/30 text-cyan-400 text-[11px] font-mono font-bold shadow-md">
+                {hud.smartAITactic}
+              </div>
+            )}
+
+            {/* Audio Commentary Voice Toggle */}
+            <button
+              onClick={() => {
+                const next = !commentaryMuted;
+                setCommentaryMuted(next);
+                Commentary.setEnabled(!next);
+                SoundEngine.playUIClick();
+              }}
+              className={`px-2.5 py-1.5 rounded-xl border text-xs font-mono font-bold flex items-center gap-1.5 cursor-pointer shadow-lg ${
+                !commentaryMuted
+                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                  : 'bg-slate-900/80 text-slate-500 border-slate-800'
+              }`}
+              title="Toggle Live AI Commentary Voice"
+            >
+              <Volume2 className="w-3.5 h-3.5" />
+              <span>{commentaryMuted ? 'MUTE REF' : 'COMMENTARY ON'}</span>
+            </button>
+
+            {/* Request VAR Review Button */}
+            <button
+              onClick={() => {
+                SoundEngine.playUIClick();
+                engineRef.current?.triggerManualVAR();
+              }}
+              className="px-2.5 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 text-xs font-mono font-bold flex items-center gap-1.5 cursor-pointer shadow-lg"
+              title="Consult Video Assistant Referee"
+            >
+              <Tv className="w-3.5 h-3.5 text-rose-400" />
+              <span>VAR REVIEW</span>
+            </button>
+
+            {/* Quick Tactical Substitution Button */}
+            <button
+              onClick={() => {
+                SoundEngine.playUIClick();
+                setQuickSubOpen(true);
+              }}
+              className="px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 hover:border-emerald-500 text-xs font-mono font-bold flex items-center gap-1.5 cursor-pointer shadow-lg"
+              title="Tactical Substitution Bench"
+            >
+              <ArrowUpDown className="w-3.5 h-3.5 text-emerald-400" />
+              <span>SUB</span>
+            </button>
 
             {/* Auto Play Pill */}
             <button
@@ -1475,6 +1599,13 @@ export const MatchViewport3D: React.FC<MatchViewport3DProps> = ({
             {/* Post-Match Actions */}
             <div className="flex flex-wrap items-center justify-center gap-3">
               <button
+                onClick={() => setShowPostMatchInterview(true)}
+                className="px-6 py-3 bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-400 text-white font-display font-bold text-sm rounded-lg transition-all flex items-center gap-2 cursor-pointer shadow-lg"
+              >
+                <MessageSquare className="w-4 h-4" />
+                PRESS INTERVIEW & RATINGS
+              </button>
+              <button
                 onClick={handlePlayAgain}
                 className="px-6 py-3 bg-white/10 hover:bg-white/15 text-white font-display font-bold text-sm rounded-lg transition-colors flex items-center gap-2 cursor-pointer"
               >
@@ -1634,6 +1765,172 @@ export const MatchViewport3D: React.FC<MatchViewport3DProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* FREE KICK CURVE SYSTEM & PENALTY MIND GAMES OVERLAY */}
+      {!isLoading && !hud.isMatchOver && (hud.activeSetPiece === 'free_kick' || hud.activeSetPiece === 'penalty_kick') && (
+        <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-30 pointer-events-auto bg-[#070A0E]/95 border-2 border-amber-500/80 rounded-2xl p-4 shadow-2xl backdrop-blur-xl flex flex-col items-center gap-3 max-w-md w-full mx-4">
+          <div className="flex items-center justify-between w-full border-b border-slate-800 pb-2">
+            <span className="text-xs font-mono font-bold text-amber-400 flex items-center gap-1.5 uppercase">
+              <Sparkles className="w-3.5 h-3.5" />
+              {hud.activeSetPiece === 'penalty_kick' ? 'PENALTY MIND GAMES' : 'FREE KICK CURVE SYSTEM'}
+            </span>
+            <span className="text-[10px] font-mono text-slate-400">MAGNUS SWERVE</span>
+          </div>
+
+          {hud.activeSetPiece === 'free_kick' && (
+            <div className="w-full space-y-2">
+              <div className="text-[11px] font-mono text-slate-300 text-center">
+                Select Curve Trajectory Style:
+              </div>
+              <div className="grid grid-cols-4 gap-2">
+                {[
+                  { label: 'Inside Curl', x: 0, z: -1 },
+                  { label: 'Trivela', x: 0, z: 1 },
+                  { label: 'Knuckle Dip', x: -1, z: 0 },
+                  { label: 'Lofted Arc', x: 1, z: 0 },
+                ].map((c) => (
+                  <button
+                    key={c.label}
+                    onClick={() => {
+                      setFreeKickCurveX(c.x);
+                      setFreeKickCurveZ(c.z);
+                      engineRef.current?.setFreeKickCurve(c.x, c.z);
+                      SoundEngine.playUIClick();
+                    }}
+                    className={`p-2 rounded-xl border text-[10px] font-mono font-bold text-center transition-all cursor-pointer ${
+                      freeKickCurveX === c.x && freeKickCurveZ === c.z
+                        ? 'bg-amber-500 text-slate-950 border-amber-400 shadow'
+                        : 'bg-slate-900 border-slate-800 text-slate-300 hover:text-white'
+                    }`}
+                  >
+                    {c.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {hud.activeSetPiece === 'penalty_kick' && (
+            <div className="w-full space-y-2">
+              <div className="text-[11px] font-mono text-slate-300 text-center">
+                Goalkeeper Mind Game Strategy:
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {(['normal', 'stutter', 'panenka'] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    onClick={() => {
+                      setPenaltyMindGame(mode);
+                      engineRef.current?.setPenaltyMindGames(mode);
+                      SoundEngine.playUIClick();
+                    }}
+                    className={`p-2 rounded-xl border text-[10px] font-mono font-bold capitalize text-center transition-all cursor-pointer ${
+                      penaltyMindGame === mode
+                        ? 'bg-amber-500 text-slate-950 border-amber-400 shadow'
+                        : 'bg-slate-900 border-slate-800 text-slate-300 hover:text-white'
+                    }`}
+                  >
+                    {mode === 'stutter' ? 'Stutter Step' : mode === 'panenka' ? 'Panenka Chip' : 'Power Drive'}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* INJURY ALERT BANNER */}
+      {!isLoading && !hud.isMatchOver && activeInjuryNotice && (
+        <div className="absolute top-24 left-1/2 -translate-x-1/2 z-30 pointer-events-auto bg-rose-950/90 border-2 border-rose-500 rounded-2xl p-3 shadow-2xl flex items-center gap-3 backdrop-blur-md animate-bounce">
+          <AlertTriangle className="w-5 h-5 text-rose-400" />
+          <div className="text-xs font-mono text-slate-200">
+            <strong>{activeInjuryNotice.player}</strong> suffered a {activeInjuryNotice.isSevere ? 'severe injury!' : 'painful knock!'}
+          </div>
+          <button
+            onClick={() => {
+              setQuickSubOpen(true);
+              setActiveInjuryNotice(null);
+            }}
+            className="px-3 py-1 bg-rose-500 hover:bg-rose-400 text-slate-950 rounded-lg text-xs font-bold font-mono cursor-pointer"
+          >
+            SUBSTITUTE NOW
+          </button>
+        </div>
+      )}
+
+      {/* QUICK SUBSTITUTION BENCH DRAWER */}
+      {quickSubOpen && (
+        <div className="fixed inset-0 z-[110] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#0B0F17] border-2 border-slate-700 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div className="flex justify-between items-center pb-2 border-b border-slate-800">
+              <span className="font-['Chakra_Petch'] font-bold text-white text-lg flex items-center gap-2">
+                <ArrowUpDown className="w-5 h-5 text-emerald-400" />
+                TACTICAL SUBSTITUTION BENCH
+              </span>
+              <button onClick={() => setQuickSubOpen(false)} className="text-slate-400 hover:text-white text-sm font-mono cursor-pointer">✕</button>
+            </div>
+            <p className="text-xs text-slate-400 font-mono">Select a bench player to swap in for the squad:</p>
+            <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+              {homeSquad.slice(11).concat(PLAYERS_DB.filter((p) => p.rating >= 88).slice(0, 4)).map((p) => (
+                <div key={p.id} className="flex items-center justify-between p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                  <div className="flex items-center gap-2.5">
+                    <PlayerPhotoAvatar player={p} size={36} className="rounded-lg" />
+                    <div>
+                      <div className="text-xs font-bold text-white">{p.name}</div>
+                      <div className="text-[10px] font-mono text-emerald-400">{p.position} • OVR {p.rating}</div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      const outPlayer = homeSquad[0];
+                      engineRef.current?.substitutePlayer(outPlayer?.id || '', p);
+                      setQuickSubOpen(false);
+                      SoundEngine.playUIClick();
+                    }}
+                    className="px-3 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs font-mono cursor-pointer"
+                  >
+                    SUB IN
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DYNAMIC MATCH INTRO & WALKOUT OVERLAY */}
+      {showMatchIntro && (
+        <MatchIntroOverlay
+          homeTeam={homeTeam}
+          awayTeam={awayTeam}
+          homeSquad={homeSquad}
+          homeFormation={homeFormation}
+          stadiumName={stadium.name}
+          weatherName={activeWeather}
+          onFinishIntro={() => setShowMatchIntro(false)}
+        />
+      )}
+
+      {/* VAR VIDEO ASSISTANT REFEREE OVERLAY */}
+      {varState.isActive && (
+        <VAROverlay
+          varState={varState}
+          onDismiss={() => setVarState((prev) => ({ ...prev, isActive: false }))}
+        />
+      )}
+
+      {/* POST-MATCH PRESS INTERVIEW & ANALYTICS MODAL */}
+      {showPostMatchInterview && (
+        <PostMatchInterviewModal
+          homeTeam={homeTeam}
+          awayTeam={awayTeam}
+          homeScore={hud.homeScore}
+          awayScore={hud.awayScore}
+          homeSquad={homeSquad}
+          stats={hud.stats}
+          onClose={() => setShowPostMatchInterview(false)}
+        />
       )}
     </div>
   );

@@ -16,10 +16,14 @@ import {
   ArticulatedPlayer3D,
   createArticulatedPlayer3D,
   createFootballMesh,
+  createReferee3D,
+  Referee3D,
 } from './PlayerMeshBuilder3D';
 import { getPlayerSignatureCelebration, SignatureCelebrationDef } from '../data/signatureCelebrations';
 import { getJerseyById, getBootsById, getMatchBallById } from '../data/equipmentStoreDatabase';
 import { SoundEngine } from './SoundEngine';
+import { Commentary } from '../services/CommentaryEngine';
+import { RecordsManager } from '../services/RecordsAndAchievementsService';
 import {
   FriendRoomService,
   OnlineGuestInputPacket,
@@ -34,7 +38,16 @@ import {
   StadiumSceneObjects,
 } from './StadiumBuilder3D';
 
-export type CameraMode = 'Broadcast' | 'Player' | 'Action' | 'Goalkeeper' | 'Free';
+export type CameraMode =
+  | 'Broadcast'
+  | 'Player'
+  | 'Action'
+  | 'Goalkeeper'
+  | 'Goal'
+  | 'Cinematic'
+  | 'Tactical'
+  | 'End-to-End'
+  | 'Free';
 export type DifficultyLevel = 'Easy' | 'Normal' | 'Hard' | 'Professional' | 'World Class';
 export type ControlScheme = 'Hybrid' | 'Keyboard' | 'Mouse';
 export type PracticeDrill = 'Free Play' | 'Passing' | 'Shooting' | 'Dribbling & Skills' | 'Free Kicks' | 'Penalties' | 'Goalkeeper Saves';
@@ -148,6 +161,11 @@ export interface MatchHUDState {
     homeYellowCards: number;
     awayYellowCards: number;
   };
+  weather?: WeatherType;
+  activeAdvantage?: boolean;
+  activeInjuryNotice?: { player: string; isSevere: boolean };
+  smartAITactic?: string;
+  freeKickCurve?: { x: number; z: number };
 }
 
 interface ReplayFrame {
@@ -193,6 +211,8 @@ export interface EngineConfig {
   activeJerseyId?: string;
   activeBootsId?: string;
   onHUDUpdate: (hud: MatchHUDState) => void;
+  onVARTriggered?: (incident: 'goal' | 'penalty' | 'offside' | 'foul', player: string, team: 'home' | 'away') => void;
+  onInjuryTriggered?: (player: FootballPlayer, isSevere: boolean) => void;
 }
 
 export class FootballEngine3D {
@@ -202,6 +222,15 @@ export class FootballEngine3D {
   private renderer: THREE.WebGLRenderer;
   private stadiumObjs: StadiumSceneObjects;
   private players: ArticulatedPlayer3D[] = [];
+  private referee: Referee3D | null = null;
+  private weatherCurrent: WeatherType = 'Sunny';
+  private lightningTimer = 8 + Math.random() * 6;
+  private advantageTimer = 0;
+  private advantageFouledTeam: 'home' | 'away' | null = null;
+  private smartAITactic = 'Balanced Dynamic Shape';
+  private customFreeKickCurve = { x: 0, z: 0 };
+  private penaltyMindGameMode: 'normal' | 'stutter' | 'panenka' = 'normal';
+  private cinematicReplayOrbit = 0;
   private controlledIdx = 9; // Default striker
 
   // Ball state
@@ -3918,6 +3947,28 @@ export class FootballEngine3D {
         this.ballPos.z + Math.cos(this.freeCamYaw) * Math.cos(this.freeCamPitch) * r
       );
       targetLookAt.set(this.ballPos.x, 0.8, this.ballPos.z);
+    } else if (this.config.cameraMode === 'Goal') {
+      // Goal camera looking out onto the pitch from behind net
+      targetCamPos.set(PITCH_WIDTH / 2 + 4.2, 2.4, 0);
+      targetLookAt.set(this.ballPos.x, 1.2, this.ballPos.z);
+    } else if (this.config.cameraMode === 'Cinematic') {
+      // Cinematic slow dramatic orbital dolly cam
+      this.cinematicReplayOrbit += dt * 0.45;
+      const r = 24;
+      targetCamPos.set(
+        this.ballPos.x + Math.cos(this.cinematicReplayOrbit) * r,
+        7.5 + Math.sin(this.cinematicReplayOrbit * 0.5) * 3,
+        this.ballPos.z + Math.sin(this.cinematicReplayOrbit) * r
+      );
+      targetLookAt.set(this.ballPos.x, 1.2, this.ballPos.z);
+    } else if (this.config.cameraMode === 'Tactical') {
+      // Bird's-eye tactical camera showing full team formation
+      targetCamPos.set(this.ballPos.x * 0.4, 46, 12);
+      targetLookAt.set(this.ballPos.x * 0.6, 0, 0);
+    } else if (this.config.cameraMode === 'End-to-End') {
+      // Longitudinal behind home team looking downfield
+      targetCamPos.set(-PITCH_WIDTH / 2 - 14, 16.5, this.ballPos.z * 0.35);
+      targetLookAt.set(this.ballPos.x + 16, 0.8, this.ballPos.z);
     } else {
       // Broadcast Camera (Default TV-style wide tracking)
       targetCamPos.set(this.ballPos.x * 0.72, 23.5, 34 + this.ballPos.z * 0.38);
@@ -3938,11 +3989,13 @@ export class FootballEngine3D {
         const pts: THREE.Vector3[] = [];
         const start = this.ballPos.clone();
         const end = new THREE.Vector3(PITCH_WIDTH / 2, 2.2, THREE.MathUtils.clamp(this.mouseWorldTarget.z, -GOAL_WIDTH * 0.45, GOAL_WIDTH * 0.45));
+        const curveOffsetZ = (this.customFreeKickCurve.z !== 0 ? this.customFreeKickCurve.z * 4.5 : (end.z >= 0 ? -3.4 : 3.4));
+        const curveOffsetY = this.customFreeKickCurve.x * 2.5;
         for (let i = 0; i < 24; i++) {
           const t = i / 23;
           const x = THREE.MathUtils.lerp(start.x, end.x, t);
-          const y = THREE.MathUtils.lerp(start.y, end.y, t) + Math.sin(t * Math.PI) * 3.2;
-          const z = THREE.MathUtils.lerp(start.z, end.z, t) + Math.sin(t * Math.PI) * (end.z >= 0 ? -3.4 : 3.4);
+          const y = THREE.MathUtils.lerp(start.y, end.y, t) + Math.sin(t * Math.PI) * (3.2 + curveOffsetY);
+          const z = THREE.MathUtils.lerp(start.z, end.z, t) + Math.sin(t * Math.PI) * curveOffsetZ;
           pts.push(new THREE.Vector3(x, y, z));
         }
         this.stadiumObjs.curveArcLine.geometry.setFromPoints(pts);
@@ -3961,6 +4014,70 @@ export class FootballEngine3D {
         pos.setY(i, y);
       }
       pos.needsUpdate = true;
+    }
+
+    // Animate Snow Flurries
+    if (this.stadiumObjs.snowSystem) {
+      const pos = this.stadiumObjs.snowSystem.geometry.getAttribute('position') as THREE.BufferAttribute;
+      for (let i = 0; i < pos.count; i++) {
+        let y = pos.getY(i) - dt * 7.5;
+        if (y < 0) y = 32;
+        pos.setY(i, y);
+        pos.setX(i, pos.getX(i) + Math.sin(performance.now() * 0.001 + i) * 0.04);
+      }
+      pos.needsUpdate = true;
+    }
+
+    // Thunderstorm Lightning Dynamic Flash
+    if (this.stadiumObjs.lightningLight) {
+      this.lightningTimer -= dt;
+      if (this.lightningTimer <= 0) {
+        this.lightningTimer = 7 + Math.random() * 8;
+        this.stadiumObjs.lightningLight.intensity = 3.6;
+        SoundEngine.playWhistle('foul');
+        setTimeout(() => {
+          if (this.stadiumObjs.lightningLight) this.stadiumObjs.lightningLight.intensity = 0;
+        }, 120);
+      }
+    }
+
+    // Animate Referee on Pitch
+    if (this.referee) {
+      const ref = this.referee;
+      const targetRefX = this.ballPos.x * 0.72;
+      const targetRefZ = this.ballPos.z > 0 ? this.ballPos.z - 11.5 : this.ballPos.z + 11.5;
+      const dx = targetRefX - ref.x;
+      const dz = targetRefZ - ref.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist > 1.2) {
+        ref.vx = (dx / dist) * Math.min(8.5, dist * 1.6);
+        ref.vz = (dz / dist) * Math.min(8.5, dist * 1.6);
+        ref.x += ref.vx * dt;
+        ref.z += ref.vz * dt;
+        ref.facingAngle = Math.atan2(dz, dx);
+        ref.root.rotation.y = -ref.facingAngle + Math.PI / 2;
+        ref.animPhase += dt * 7.5;
+        const swing = Math.sin(ref.animPhase) * 0.45;
+        ref.leftLeg.rotation.x = swing;
+        ref.rightLeg.rotation.x = -swing;
+        ref.leftArm.rotation.x = -swing * 0.6;
+        ref.rightArm.rotation.x = swing * 0.6;
+      } else {
+        ref.leftLeg.rotation.x = 0;
+        ref.rightLeg.rotation.x = 0;
+      }
+
+      if (ref.raisedCardTimer > 0) {
+        ref.raisedCardTimer -= dt;
+        ref.rightArm.rotation.x = -Math.PI * 0.82;
+        ref.yellowCardMesh.visible = ref.cardType === 'yellow';
+        ref.redCardMesh.visible = ref.cardType === 'red';
+      } else {
+        ref.yellowCardMesh.visible = false;
+        ref.redCardMesh.visible = false;
+        ref.cardType = 'none';
+      }
+      ref.root.position.set(ref.x, 0, ref.z);
     }
 
     // Animate Goal Confetti
@@ -4137,6 +4254,54 @@ export class FootballEngine3D {
         awayPossession: 100 - homePoss,
         ...this.stats,
       },
+      weather: this.weatherCurrent,
+      activeAdvantage: this.advantageTimer > 0,
+      smartAITactic: this.smartAITactic,
+      freeKickCurve: this.customFreeKickCurve,
     });
+  }
+
+  public setWeather(weather: WeatherType) {
+    this.weatherCurrent = weather;
+    this.config.weather = weather;
+    Commentary.triggerWeatherChange(weather);
+  }
+
+  public setFreeKickCurve(curveX: number, curveZ: number) {
+    this.customFreeKickCurve = { x: curveX, z: curveZ };
+  }
+
+  public setPenaltyMindGames(mode: 'normal' | 'stutter' | 'panenka') {
+    this.penaltyMindGameMode = mode;
+  }
+
+  public substitutePlayer(outPlayerId: string, inPlayer: FootballPlayer) {
+    const p = this.players.find((pl) => pl.data.id === outPlayerId);
+    if (!p) return;
+    const oldName = p.data.name;
+    p.data = inPlayer;
+    p.stamina = 100;
+    p.injuryStatus = 'none';
+    Commentary.speak(`Substitution confirmed: ${oldName} makes way for ${inPlayer.name}!`, 'Gary Neville');
+    this.setCommentary(`SUB: ${inPlayer.name.toUpperCase()} ON FOR ${oldName.toUpperCase()}`);
+  }
+
+  public triggerManualVAR() {
+    if (this.config.onVARTriggered) {
+      const controlled = this.getControlledPlayer() || this.players[0];
+      this.config.onVARTriggered('goal', controlled.data.name, 'home');
+      Commentary.triggerVAR('potential goal line clearance');
+    }
+  }
+
+  public triggerChampionshipFireworks() {
+    if (this.stadiumObjs.fireworkSystem) {
+      const pos = this.stadiumObjs.fireworkSystem.geometry.getAttribute('position') as THREE.BufferAttribute;
+      for (let i = 0; i < pos.count; i++) {
+        pos.setXYZ(i, (Math.random() - 0.5) * 60, 25 + Math.random() * 20, (Math.random() - 0.5) * 50);
+      }
+      pos.needsUpdate = true;
+    }
+    SoundEngine.playGoalRoar();
   }
 }

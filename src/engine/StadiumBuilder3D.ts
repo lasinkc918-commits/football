@@ -13,6 +13,9 @@ export interface StadiumSceneObjects {
   crowdBasePositions: Float32Array;
   crowdColors: Float32Array;
   rainSystem: THREE.Points | null;
+  snowSystem: THREE.Points | null;
+  lightningLight: THREE.DirectionalLight | null;
+  fireworkSystem: THREE.Points | null;
   confettiSystem: THREE.Points;
   confettiVelocities: Float32Array;
   leftNetMesh: THREE.Mesh;
@@ -30,11 +33,20 @@ export function buildStadiumScene(
 ): StadiumSceneObjects {
   // 1. Sky & Atmospheric Fog
   const isNight = weather === 'Night' || stadium.id === 'night' || stadium.id === 'final';
-  const isRain = weather === 'Rain' || stadium.id === 'rain';
+  const isRain = weather === 'Rain' || weather === 'Thunderstorm' || stadium.id === 'rain';
+  const isSnow = weather === 'Snow';
+  const isFog = weather === 'Fog';
+  const isThunderstorm = weather === 'Thunderstorm';
   const isCloudy = weather === 'Cloudy';
 
   const skyColor = isNight
     ? 0x050811
+    : isThunderstorm
+    ? 0x080c18
+    : isSnow
+    ? 0xdbeafe
+    : isFog
+    ? 0x64748b
     : isRain
     ? 0x16202c
     : isCloudy
@@ -42,12 +54,23 @@ export function buildStadiumScene(
     : 0x0d1b2a;
 
   scene.background = new THREE.Color(skyColor);
-  scene.fog = new THREE.FogExp2(skyColor, isRain ? 0.0048 : isNight ? 0.0032 : 0.0025);
+  scene.fog = new THREE.FogExp2(
+    skyColor,
+    isFog ? 0.014 : isSnow ? 0.006 : isRain ? 0.0048 : isNight ? 0.0032 : 0.0025
+  );
 
   // 2. Three-Point + Stadium Floodlight Rig
-  const ambientIntensity = isNight ? 0.55 : isRain ? 0.65 : 0.85;
+  const ambientIntensity = isThunderstorm ? 0.4 : isNight ? 0.55 : isRain ? 0.65 : 0.85;
   const ambientLight = new THREE.AmbientLight(isNight ? 0xcbd5e1 : 0xf8fafc, ambientIntensity);
   scene.add(ambientLight);
+
+  // Dynamic Lightning Flash Light for Thunderstorms
+  let lightningLight: THREE.DirectionalLight | null = null;
+  if (isThunderstorm) {
+    lightningLight = new THREE.DirectionalLight(0xdbeafe, 0);
+    lightningLight.position.set(0, 80, 0);
+    scene.add(lightningLight);
+  }
 
   const sunLight = new THREE.DirectionalLight(isNight ? 0xe2e8f0 : 0xfffbeb, isNight ? 1.35 : 1.55);
   sunLight.position.set(35, 65, 42);
@@ -394,6 +417,28 @@ export function buildStadiumScene(
     scene.add(rainSystem);
   }
 
+  // Snow Particle System
+  let snowSystem: THREE.Points | null = null;
+  if (isSnow) {
+    const snowCount = graphicsQuality === 'Low' ? 800 : 2200;
+    const snowGeo = new THREE.BufferGeometry();
+    const snowPos = new Float32Array(snowCount * 3);
+    for (let i = 0; i < snowCount; i++) {
+      snowPos[i * 3] = (Math.random() - 0.5) * 140;
+      snowPos[i * 3 + 1] = Math.random() * 32;
+      snowPos[i * 3 + 2] = (Math.random() - 0.5) * 100;
+    }
+    snowGeo.setAttribute('position', new THREE.BufferAttribute(snowPos, 3));
+    const snowMat = new THREE.PointsMaterial({
+      color: 0xffffff,
+      size: 0.38,
+      transparent: true,
+      opacity: 0.85,
+    });
+    snowSystem = new THREE.Points(snowGeo, snowMat);
+    scene.add(snowSystem);
+  }
+
   // 9. Goal Confetti & Fireworks Particle System
   const confettiCount = 500;
   const confettiGeo = new THREE.BufferGeometry();
@@ -420,6 +465,25 @@ export function buildStadiumScene(
   });
   const confettiSystem = new THREE.Points(confettiGeo, confettiMat);
   scene.add(confettiSystem);
+
+  // Championship Fireworks Particle System
+  const fireworkCount = 300;
+  const fwGeo = new THREE.BufferGeometry();
+  const fwPos = new Float32Array(fireworkCount * 3);
+  for (let i = 0; i < fireworkCount; i++) {
+    fwPos[i * 3] = 0;
+    fwPos[i * 3 + 1] = -50;
+    fwPos[i * 3 + 2] = 0;
+  }
+  fwGeo.setAttribute('position', new THREE.BufferAttribute(fwPos, 3));
+  const fwMat = new THREE.PointsMaterial({
+    color: 0xfbbf24,
+    size: 0.65,
+    transparent: true,
+    opacity: 0.9,
+  });
+  const fireworkSystem = new THREE.Points(fwGeo, fwMat);
+  scene.add(fireworkSystem);
 
   // 10. 3D Mouse/Directional Aim Reticle & Curve Trajectory Line
   const aimArrowGroup = new THREE.Group();
@@ -455,6 +519,9 @@ export function buildStadiumScene(
     crowdBasePositions,
     crowdColors,
     rainSystem,
+    snowSystem,
+    lightningLight,
+    fireworkSystem,
     confettiSystem,
     confettiVelocities,
     leftNetMesh,

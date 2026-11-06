@@ -77,6 +77,12 @@ import { WEAPONS_ARMORY, SHOOTER_ARENAS, WeaponItem } from './data/weaponsDataba
 import { ArmoryAndShooterHub } from './components/ArmoryAndShooterHub';
 import { ShooterMatchViewport3D } from './components/ShooterMatchViewport3D';
 import { WalletAndLockerModal } from './components/WalletAndLockerModal';
+import { TrophyRoomModal } from './components/TrophyRoomModal';
+import { CustomKitDesignerModal, CustomKitConfig } from './components/CustomKitDesignerModal';
+import { TrainingSkillGamesModal } from './components/TrainingSkillGamesModal';
+import { TransferNegotiationModal } from './components/TransferNegotiationModal';
+import { RecordsManager } from './services/RecordsAndAchievementsService';
+import { PlayerDevelopment } from './services/PlayerDevelopmentService';
 import {
   PersistentDatabaseService,
   GameSaveState,
@@ -190,6 +196,12 @@ export default function App() {
   });
 
   const [isWalletLockerOpen, setIsWalletLockerOpen] = useState<boolean>(false);
+  const [isTrophyRoomOpen, setIsTrophyRoomOpen] = useState<boolean>(false);
+  const [isKitDesignerOpen, setIsKitDesignerOpen] = useState<boolean>(false);
+  const [isTrainingAcademyOpen, setIsTrainingAcademyOpen] = useState<boolean>(false);
+  const [transferNegotiationPlayer, setTransferNegotiationPlayer] = useState<FootballPlayer | null>(null);
+  const [isSellingPlayer, setIsSellingPlayer] = useState<boolean>(false);
+
   const [userTeam, setUserTeam] = useState<TeamData>(() => {
     const savedClubId = localStorage.getItem('fe_favourite_club_id');
     return TEAMS_DB.find((t) => t.id === savedClubId) || TEAMS_DB[0]; // Real Madrid default
@@ -1279,6 +1291,39 @@ export default function App() {
             <span className="w-3.5 h-3.5 rounded-full bg-emerald-400 text-slate-950 text-[10px] font-black flex items-center justify-center">₹</span>
             Wallet & Locker
           </button>
+          <button
+            onClick={() => {
+              SoundEngine.playUIClick();
+              setIsTrainingAcademyOpen(true);
+            }}
+            className="hover:text-cyan-300 transition-colors whitespace-nowrap cursor-pointer text-cyan-400 font-semibold flex items-center gap-1.5"
+            title="Skill Games & Player Training Academy"
+          >
+            <Zap className="w-3.5 h-3.5 text-cyan-400" />
+            Training Academy
+          </button>
+          <button
+            onClick={() => {
+              SoundEngine.playUIClick();
+              setIsKitDesignerOpen(true);
+            }}
+            className="hover:text-violet-300 transition-colors whitespace-nowrap cursor-pointer text-violet-400 font-semibold flex items-center gap-1.5"
+            title="Custom Kit & Boots Designer Studio"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-violet-400" />
+            Kit Designer
+          </button>
+          <button
+            onClick={() => {
+              SoundEngine.playUIClick();
+              setIsTrophyRoomOpen(true);
+            }}
+            className="hover:text-amber-300 transition-colors whitespace-nowrap cursor-pointer text-amber-400 font-semibold flex items-center gap-1.5"
+            title="Trophy Cabinet, Hall of Fame Records & Achievement Badges"
+          >
+            <Trophy className="w-3.5 h-3.5 text-amber-400" />
+            Trophy Room
+          </button>
         </nav>
 
         {/* Zone 3: Primary Actions (Online Match + Sign-In + PLAY MATCH) */}
@@ -1415,6 +1460,36 @@ export default function App() {
           }`}
         >
           World Cup
+        </button>
+        <button
+          onClick={() => {
+            SoundEngine.playUIClick();
+            setIsTrainingAcademyOpen(true);
+          }}
+          className="px-3 py-1.5 rounded-lg whitespace-nowrap bg-cyan-950/40 text-cyan-400 border border-cyan-500/30 flex items-center gap-1.5"
+        >
+          <Zap className="w-3.5 h-3.5 text-cyan-400" />
+          Training
+        </button>
+        <button
+          onClick={() => {
+            SoundEngine.playUIClick();
+            setIsKitDesignerOpen(true);
+          }}
+          className="px-3 py-1.5 rounded-lg whitespace-nowrap bg-violet-950/40 text-violet-400 border border-violet-500/30 flex items-center gap-1.5"
+        >
+          <Sparkles className="w-3.5 h-3.5 text-violet-400" />
+          Kit Designer
+        </button>
+        <button
+          onClick={() => {
+            SoundEngine.playUIClick();
+            setIsTrophyRoomOpen(true);
+          }}
+          className="px-3 py-1.5 rounded-lg whitespace-nowrap bg-amber-950/40 text-amber-400 border border-amber-500/30 flex items-center gap-1.5"
+        >
+          <Trophy className="w-3.5 h-3.5 text-amber-400" />
+          Trophy Room
         </button>
         <button
           onClick={() => navigateTo('settings')}
@@ -2133,17 +2208,17 @@ export default function App() {
 
                   <div>
                     <label className="block text-xs text-slate-400 mb-2">
-                      Weather Conditions
+                      Weather System (Dynamic Atmosphere)
                     </label>
-                    <div className="grid grid-cols-4 gap-2">
-                      {(['Sunny', 'Night', 'Cloudy', 'Rain'] as WeatherType[]).map((w) => (
+                    <div className="grid grid-cols-4 sm:grid-cols-7 gap-1.5">
+                      {(['Sunny', 'Night', 'Cloudy', 'Rain', 'Snow', 'Fog', 'Thunderstorm'] as WeatherType[]).map((w) => (
                         <button
                           key={w}
                           onClick={() => setSelectedWeather(w)}
-                          className={`py-2 rounded-lg text-xs font-semibold transition-colors ${
+                          className={`py-2 px-1 text-center rounded-lg text-xs font-semibold transition-colors ${
                             selectedWeather === w
-                              ? 'bg-[#38BDF8] text-[#070A0E] font-bold'
-                              : 'bg-[#070A0E] text-slate-300 border border-white/10'
+                              ? 'bg-[#38BDF8] text-[#070A0E] font-bold shadow-md shadow-[#38BDF8]/20'
+                              : 'bg-[#070A0E] text-slate-300 border border-white/10 hover:border-white/25'
                           }`}
                         >
                           {w}
@@ -2316,6 +2391,14 @@ export default function App() {
               setShowOnlineMatchModal(true);
             }}
             onTriggerPaymentCheckout={(item) => setCheckoutItem(item)}
+            onNegotiatePlayer={(p) => {
+              setIsSellingPlayer(false);
+              setTransferNegotiationPlayer(p);
+            }}
+            onSellPlayer={(p) => {
+              setIsSellingPlayer(true);
+              setTransferNegotiationPlayer(p);
+            }}
           />
         )}
 
@@ -2586,6 +2669,103 @@ export default function App() {
           } catch {}
         }}
       />
+
+      {/* ADVANCED MODALS: TROPHY ROOM, KIT DESIGNER, TRAINING ACADEMY, TRANSFER NEGOTIATIONS */}
+      {isTrophyRoomOpen && (
+        <TrophyRoomModal
+          onClose={() => setIsTrophyRoomOpen(false)}
+          onClaimReward={(rewardCoins, rewardRupees) => {
+            if (rewardCoins > 0) setCoins((c) => c + rewardCoins);
+            if (rewardRupees > 0) {
+              setWalletRupees((r) => {
+                const next = r + rewardRupees;
+                try {
+                  localStorage.setItem('fe_wallet_rupees', String(next));
+                } catch {}
+                return next;
+              });
+            }
+          }}
+        />
+      )}
+
+      {isKitDesignerOpen && (
+        <CustomKitDesignerModal
+          onClose={() => setIsKitDesignerOpen(false)}
+          onSaveKit={(kit: CustomKitConfig) => {
+            setActiveJerseyId(kit.id);
+            setUnlockedJerseyIds((prev) => (prev.includes(kit.id) ? prev : [...prev, kit.id]));
+            try {
+              localStorage.setItem('fe_active_jersey_v1', kit.id);
+            } catch {}
+          }}
+        />
+      )}
+
+      {isTrainingAcademyOpen && (
+        <TrainingSkillGamesModal
+          squad={userSquad}
+          coins={coins}
+          onSpendCoins={(amt) => {
+            if (coins >= amt) {
+              setCoins((c) => c - amt);
+              return true;
+            }
+            return false;
+          }}
+          onLaunchPracticeMode={(_drillType) => {
+            setIsTrainingAcademyOpen(false);
+            setSelectedMode('practice');
+            setScreen('in_match');
+          }}
+          onClose={() => setIsTrainingAcademyOpen(false)}
+        />
+      )}
+
+      {transferNegotiationPlayer && (
+        <TransferNegotiationModal
+          player={transferNegotiationPlayer}
+          isSellingMode={isSellingPlayer}
+          userCoins={coins}
+          userRupees={walletRupees}
+          onConfirmPurchase={(p, costCoins, costRupees) => {
+            setCoins((c) => Math.max(0, c - costCoins));
+            setWalletRupees((r) => {
+              const next = Math.max(0, r - costRupees);
+              try {
+                localStorage.setItem('fe_wallet_rupees', String(next));
+              } catch {}
+              return next;
+            });
+            setUnlockedPlayerIds((prev) => (prev.includes(p.id) ? prev : [...prev, p.id]));
+            setUserSquad((prev) => placeNewPlayerInMatchingPosition(prev, p, userFormation));
+            setTransferNegotiationPlayer(null);
+          }}
+          onConfirmSale={(p, earnCoins, earnRupees) => {
+            setCoins((c) => c + earnCoins);
+            setWalletRupees((r) => {
+              const next = r + earnRupees;
+              try {
+                localStorage.setItem('fe_wallet_rupees', String(next));
+              } catch {}
+              return next;
+            });
+            setUnlockedPlayerIds((prev) => prev.filter((id) => id !== p.id));
+            setUserSquad((prev) => {
+              const remainingUnlocked = allPlayers.filter(
+                (cand) => cand.id !== p.id && unlockedPlayerIds.includes(cand.id)
+              );
+              return buildOptimalSquadForFormation(
+                remainingUnlocked,
+                prev.filter((cand) => cand.id !== p.id),
+                userFormation
+              );
+            });
+            setTransferNegotiationPlayer(null);
+          }}
+          onClose={() => setTransferNegotiationPlayer(null)}
+        />
+      )}
 
       {/* QUIET FOOTER */}
       <footer className="border-t border-white/10 py-6 px-6 bg-[#070A0E] text-xs text-slate-400">

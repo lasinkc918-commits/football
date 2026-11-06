@@ -495,6 +495,7 @@ export function getPlayerLikenessProfile(player: FootballPlayer): PlayerLikeness
 interface PlayerPhotoAvatarProps {
   player: FootballPlayer;
   className?: string;
+  size?: number;
   showRatingBadge?: boolean;
   showPositionBadge?: boolean;
 }
@@ -502,6 +503,7 @@ interface PlayerPhotoAvatarProps {
 export const PlayerPhotoAvatar: React.FC<PlayerPhotoAvatarProps> = ({
   player,
   className = 'w-14 h-14 rounded-xl',
+  size,
   showRatingBadge = false,
   showPositionBadge = false,
 }) => {

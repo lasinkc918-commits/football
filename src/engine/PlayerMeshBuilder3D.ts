@@ -33,6 +33,10 @@ export interface ArticulatedPlayer3D {
   celebrationTimer: number;
   celebrationType: CelebrationType;
   signatureCelebration?: SignatureCelebrationDef;
+  emotion?: 'celebrating' | 'frustrated' | 'arguing' | 'exhausted' | 'hyped' | 'normal';
+  injuryStatus?: 'none' | 'knock' | 'severe';
+  yellowCards?: number;
+  isRedCarded?: boolean;
 
   // 3D Scene Nodes for Biomechanical Human Animation
   root: THREE.Group;
@@ -1407,4 +1411,144 @@ export function createFootballMesh(ballDesignId?: string): {
   const ballTrail = new THREE.Line(trailGeo, trailMat);
 
   return { ballGroup, ballMesh, ballTrail, trailPositions };
+}
+
+export interface Referee3D {
+  root: THREE.Group;
+  torso: THREE.Group;
+  leftArm: THREE.Group;
+  rightArm: THREE.Group;
+  leftLeg: THREE.Group;
+  rightLeg: THREE.Group;
+  cardGroup: THREE.Group;
+  yellowCardMesh: THREE.Mesh;
+  redCardMesh: THREE.Mesh;
+  whistleMesh: THREE.Mesh;
+  x: number;
+  z: number;
+  vx: number;
+  vz: number;
+  facingAngle: number;
+  animPhase: number;
+  raisedCardTimer: number;
+  cardType: 'none' | 'yellow' | 'red';
+  whistleTimer: number;
+}
+
+export function createReferee3D(startX: number, startZ: number): Referee3D {
+  const root = new THREE.Group();
+  root.position.set(startX, 0, startZ);
+
+  // Fluorescent Yellow/Neon Ref Shirt
+  const refShirtMat = new THREE.MeshStandardMaterial({
+    color: 0xeab308, // Neon yellow ref shirt
+    roughness: 0.45,
+  });
+  const blackShortsMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.6 });
+  const skinMat = new THREE.MeshStandardMaterial({ color: 0xd4a373, roughness: 0.65 });
+  const socksMat = new THREE.MeshStandardMaterial({ color: 0x020617, roughness: 0.6 });
+
+  // Torso
+  const torso = new THREE.Group();
+  torso.position.y = 1.05;
+  const chestMesh = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.62, 0.32), refShirtMat);
+  chestMesh.position.y = 0.31;
+  torso.add(chestMesh);
+
+  // Head
+  const headMesh = new THREE.Mesh(new THREE.SphereGeometry(0.2, 16, 16), skinMat);
+  headMesh.position.y = 0.8;
+  torso.add(headMesh);
+
+  // Whistle around neck
+  const whistleMesh = new THREE.Mesh(
+    new THREE.BoxGeometry(0.08, 0.05, 0.12),
+    new THREE.MeshStandardMaterial({ color: 0xc0c0c0, metalness: 0.8 })
+  );
+  whistleMesh.position.set(0, 0.52, 0.18);
+  torso.add(whistleMesh);
+
+  // Arms
+  const leftArm = new THREE.Group();
+  leftArm.position.set(-0.35, 0.54, 0);
+  const leftArmMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.06, 0.48), skinMat);
+  leftArmMesh.position.y = -0.24;
+  leftArm.add(leftArmMesh);
+  torso.add(leftArm);
+
+  const rightArm = new THREE.Group();
+  rightArm.position.set(0.35, 0.54, 0);
+  const rightArmMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.06, 0.48), skinMat);
+  rightArmMesh.position.y = -0.24;
+  rightArm.add(rightArmMesh);
+
+  // Card Group attached to right hand
+  const cardGroup = new THREE.Group();
+  cardGroup.position.set(0, -0.48, 0.1);
+
+  const yellowCardMesh = new THREE.Mesh(
+    new THREE.BoxGeometry(0.12, 0.18, 0.01),
+    new THREE.MeshBasicMaterial({ color: 0xfacc15 })
+  );
+  yellowCardMesh.visible = false;
+  cardGroup.add(yellowCardMesh);
+
+  const redCardMesh = new THREE.Mesh(
+    new THREE.BoxGeometry(0.12, 0.18, 0.01),
+    new THREE.MeshBasicMaterial({ color: 0xef4444 })
+  );
+  redCardMesh.visible = false;
+  cardGroup.add(redCardMesh);
+
+  rightArm.add(cardGroup);
+  torso.add(rightArm);
+  root.add(torso);
+
+  // Hips & Shorts
+  const hips = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.28, 0.3), blackShortsMat);
+  hips.position.y = 0.92;
+  root.add(hips);
+
+  // Legs
+  const leftLeg = new THREE.Group();
+  leftLeg.position.set(-0.16, 0.82, 0);
+  const leftThigh = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.08, 0.42), blackShortsMat);
+  leftThigh.position.y = -0.21;
+  leftLeg.add(leftThigh);
+  const leftCalf = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.07, 0.42), socksMat);
+  leftCalf.position.y = -0.58;
+  leftLeg.add(leftCalf);
+  root.add(leftLeg);
+
+  const rightLeg = new THREE.Group();
+  rightLeg.position.set(0.16, 0.82, 0);
+  const rightThigh = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.08, 0.42), blackShortsMat);
+  rightThigh.position.y = -0.21;
+  rightLeg.add(rightThigh);
+  const rightCalf = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.07, 0.42), socksMat);
+  rightCalf.position.y = -0.58;
+  rightLeg.add(rightCalf);
+  root.add(rightLeg);
+
+  return {
+    root,
+    torso,
+    leftArm,
+    rightArm,
+    leftLeg,
+    rightLeg,
+    cardGroup,
+    yellowCardMesh,
+    redCardMesh,
+    whistleMesh,
+    x: startX,
+    z: startZ,
+    vx: 0,
+    vz: 0,
+    facingAngle: 0,
+    animPhase: 0,
+    raisedCardTimer: 0,
+    cardType: 'none',
+    whistleTimer: 0,
+  };
 }

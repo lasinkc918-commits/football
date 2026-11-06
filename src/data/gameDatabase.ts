@@ -410,7 +410,7 @@ export type StadiumId =
   | 'asian'
   | 'international';
 
-export type WeatherType = 'Sunny' | 'Night' | 'Cloudy' | 'Rain';
+export type WeatherType = 'Sunny' | 'Night' | 'Cloudy' | 'Rain' | 'Snow' | 'Fog' | 'Thunderstorm';
 
 export interface StadiumInfo {
   id: StadiumId;
@@ -1455,7 +1455,9 @@ export type MatchModeId =
   | 'gk_challenge'
   | 'skill_challenge'
   | 'world_cup'
-  | 'tournament';
+  | 'tournament'
+  | 'street_football'
+  | 'futsal';
 
 export interface MatchModeInfo {
   id: MatchModeId;
@@ -1548,6 +1550,24 @@ export const MATCH_MODES: MatchModeInfo[] = [
     durationLabel: 'Timed Trial',
     description: 'Weave through slalom gates, execute skill moves in bonus zones, and curl finishes into corner targets.',
     rewardCoins: 4000,
+  },
+  {
+    id: 'street_football',
+    title: 'Street Football Cage',
+    subtitle: '5v5 Concrete Arena & Wall Rebounds',
+    playersPerSide: '5 vs 5',
+    durationLabel: '3 Mins',
+    description: 'High-octane urban cage football. Rebound the ball off chain-link fences, show off panna nutmegs, and strike into mini cage goals.',
+    rewardCoins: 12000,
+  },
+  {
+    id: 'futsal',
+    title: 'Indoor Futsal Arena',
+    subtitle: '5v5 Parquet Court & Low-Bounce Ball',
+    playersPerSide: '5 vs 5',
+    durationLabel: '3 Mins',
+    description: 'Official indoor futsal with high-friction parquet court, 4-second restart countdown, low-bounce spec ball, and tactical precision.',
+    rewardCoins: 12000,
   },
 ];
 
