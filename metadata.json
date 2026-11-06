@@ -1,0 +1,8 @@
+{
+  "name": "Remix Pro Strike Football",
+  "description": "Experience fluid, premium 3D football action directly in your browser with responsive controls and realistic gameplay mechanics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -1,0 +1,2611 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  Award,
+  Check,
+  ChevronRight,
+  CloudRain,
+  Coins,
+  Eye,
+  Moon,
+  Play,
+  Settings as SettingsIcon,
+  Shield,
+  Sliders,
+  Sparkles,
+  Sun,
+  Trophy,
+  User,
+  Users,
+  Wifi,
+  Globe,
+  Zap,
+  Crosshair,
+} from 'lucide-react';
+import {
+  buildOptimalSquadForFormation,
+  CelebrationType,
+  findBestSlotIndexForPlayer,
+  FootballPlayer,
+  FormationName,
+  FORMATIONS,
+  MATCH_MODES,
+  MatchModeId,
+  PackDefinition,
+  PlayerRarity,
+  PLAYERS_DB,
+  STADIUMS,
+  StadiumInfo,
+  TeamData,
+  TEAMS_DB,
+  UpgradeCardItem,
+  WeatherType,
+} from './data/gameDatabase';
+import {
+  AutoSwitchMode,
+  CameraMode,
+  ControlScheme,
+  DEFAULT_KEY_BINDINGS,
+  DifficultyLevel,
+  KeyBindings,
+  MatchHUDState,
+} from './engine/FootballEngine3D';
+import { SoundEngine } from './engine/SoundEngine';
+import { PlayerPhotoAvatar } from './components/PlayerPhotoAvatar';
+import { MatchViewport3D, OnlineMatchViewportInfo } from './components/MatchViewport3D';
+import { OpponentSquadInfo, OpponentSquadPopup } from './components/OpponentSquadPopup';
+import { WorldCupAndTournaments } from './components/WorldCupAndTournaments';
+import { MyTeamAndMarket } from './components/MyTeamAndMarket';
+import {
+  ProfileLeaderboardSettings,
+  UserProfileStats,
+} from './components/ProfileLeaderboardSettings';
+import { WelcomeOnboardingScreen } from './components/WelcomeOnboardingScreen';
+import {
+  AuthenticatedAccount,
+  GoogleAuthModal,
+  PaymentCheckoutItem,
+  PaymentCheckoutModal,
+} from './components/AuthAndCheckoutModal';
+import { OnlineMatchModal, OnlineMatchLaunchPayload } from './components/OnlineMatchModal';
+import { useAppIcon } from './data/appIconStore';
+import { WEAPONS_ARMORY, SHOOTER_ARENAS, WeaponItem } from './data/weaponsDatabase';
+import { ArmoryAndShooterHub } from './components/ArmoryAndShooterHub';
+import { ShooterMatchViewport3D } from './components/ShooterMatchViewport3D';
+import { WalletAndLockerModal } from './components/WalletAndLockerModal';
+import {
+  PersistentDatabaseService,
+  GameSaveState,
+  AutoSaveStatus,
+} from './services/PersistentDatabaseService';
+import heroStadiumImg from './assets/images/hero_stadium_backdrop_1791305638088.jpg';
+
+type ActiveScreen =
+  | 'welcome'
+  | 'home'
+  | 'play_setup'
+  | 'in_match'
+  | 'world_cup'
+  | 'tournaments'
+  | 'my_team'
+  | 'transfer_market'
+  | 'upgrades'
+  | 'packs'
+  | 'spin_roulette'
+  | 'armory_hub'
+  | 'shooter_match'
+  | 'profile'
+  | 'leaderboard'
+  | 'settings';
+
+interface SavedPlayerBoost {
+  pace?: number;
+  shooting?: number;
+  passing?: number;
+  dribbling?: number;
+  defending?: number;
+  physical?: number;
+  stamina?: number;
+  skill?: number;
+  curve?: number;
+  reactions?: number;
+  rating?: number;
+  weakFoot?: number;
+  skillMoves?: number;
+  rarity?: PlayerRarity;
+}
+
+export default function App() {
+  const { iconUrl } = useAppIcon();
+  const [screen, setScreen] = useState<ActiveScreen>(() => {
+    const isSignedIn =
+      Boolean(localStorage.getItem('fe_auth_token_v3')) ||
+      Boolean(localStorage.getItem('fe_saved_account_v3'));
+    return isSignedIn ? 'home' : 'welcome';
+  });
+
+  // Persistent / Session Club & Match State (500,000 Starting Coins for new accounts)
+  const [coins, setCoins] = useState<number>(() => {
+    const saved = localStorage.getItem('fe_coins');
+    if (saved !== null && !Number.isNaN(Number(saved))) {
+      return Math.max(0, Number(saved));
+    }
+    return 500000;
+  });
+
+  // Virtual In-Game Wallet Currency (Earn ₹5,00,000 automatically after every completed match)
+  const [walletRupees, setWalletRupees] = useState<number>(() => {
+    const saved = localStorage.getItem('fe_wallet_rupees');
+    if (saved !== null && !Number.isNaN(Number(saved))) {
+      return Math.max(0, Number(saved));
+    }
+    return 500000;
+  });
+
+  // Ball & Equipment Customization State
+  const [unlockedBallIds, setUnlockedBallIds] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem('fe_unlocked_balls_v1');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    return ['ball_efootball_elite'];
+  });
+  const [activeBallId, setActiveBallId] = useState<string>(() => {
+    return localStorage.getItem('fe_active_ball_v1') || 'ball_efootball_elite';
+  });
+
+  const [unlockedJerseyIds, setUnlockedJerseyIds] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem('fe_unlocked_jerseys_v1');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    return ['jersey_real_madrid_2425'];
+  });
+  const [activeJerseyId, setActiveJerseyId] = useState<string>(() => {
+    return localStorage.getItem('fe_active_jersey_v1') || 'jersey_real_madrid_2425';
+  });
+
+  const [unlockedBootsIds, setUnlockedBootsIds] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem('fe_unlocked_boots_v1');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    return ['boots_mercurial_superfly'];
+  });
+  const [activeBootsId, setActiveBootsId] = useState<string>(() => {
+    return localStorage.getItem('fe_active_boots_v1') || 'boots_mercurial_superfly';
+  });
+
+  const [isWalletLockerOpen, setIsWalletLockerOpen] = useState<boolean>(false);
+  const [userTeam, setUserTeam] = useState<TeamData>(() => {
+    const savedClubId = localStorage.getItem('fe_favourite_club_id');
+    return TEAMS_DB.find((t) => t.id === savedClubId) || TEAMS_DB[0]; // Real Madrid default
+  });
+  const [awayTeam, setAwayTeam] = useState<TeamData>(TEAMS_DB[1]); // FC Barcelona default
+  const [userFormation, setUserFormation] = useState<FormationName>(() => {
+    const saved = localStorage.getItem('fe_formation') as FormationName | null;
+    return saved || '4-3-3';
+  });
+  const [unlockedPlayerIds, setUnlockedPlayerIds] = useState<string[]>(() => {
+    const initialIds = PLAYERS_DB.filter((p) => p.initialUnlocked).map((p) => p.id);
+    try {
+      const savedRaw = localStorage.getItem('fe_unlocked_player_ids');
+      if (savedRaw) {
+        const parsed = JSON.parse(savedRaw);
+        if (Array.isArray(parsed)) {
+          return Array.from(new Set([...initialIds, ...parsed]));
+        }
+      }
+    } catch {
+      // ignore parse errors
+    }
+    return initialIds;
+  });
+  const [userSquad, setUserSquad] = useState<FootballPlayer[]>(() => {
+    const savedFormation = (localStorage.getItem('fe_formation') as FormationName) || '4-3-3';
+    try {
+      const savedRaw = localStorage.getItem('fe_squad_ids');
+      if (savedRaw) {
+        const parsed = JSON.parse(savedRaw);
+        if (Array.isArray(parsed) && parsed.length >= 11) {
+          const resolved = parsed
+            .map((id: string) => PLAYERS_DB.find((p) => p.id === id))
+            .filter((p): p is FootballPlayer => Boolean(p));
+          if (resolved.length >= 11) {
+            return buildOptimalSquadForFormation(resolved, resolved, savedFormation);
+          }
+        }
+      }
+    } catch {
+      // ignore parse errors
+    }
+    const starterUnlocked = PLAYERS_DB.filter((p) => p.initialUnlocked);
+    return buildOptimalSquadForFormation(starterUnlocked, starterUnlocked, savedFormation);
+  });
+  const [captainId, setCaptainId] = useState<string>(() => {
+    return (
+      localStorage.getItem('fe_captain_id') ||
+      PLAYERS_DB.find((p) => p.initialUnlocked)?.id ||
+      PLAYERS_DB[0].id
+    );
+  });
+  const [preferredCelebration, setPreferredCelebration] = useState<CelebrationType>(() => {
+    return (
+      (localStorage.getItem('fe_celebration') as CelebrationType) || 'Knee Slide Surge'
+    );
+  });
+
+  // Match Configuration State
+  const [selectedMode, setSelectedMode] = useState<MatchModeId>('quick_match');
+  const [selectedStadium, setSelectedStadium] = useState<StadiumInfo>(STADIUMS[0]);
+  const [selectedWeather, setSelectedWeather] = useState<WeatherType>('Night');
+  const [difficulty, setDifficulty] = useState<DifficultyLevel>('Professional');
+  const [cameraMode, setCameraMode] = useState<CameraMode>('Broadcast');
+  const [controlScheme, setControlScheme] = useState<ControlScheme>('Hybrid');
+  const [graphicsQuality, setGraphicsQuality] = useState<'Low' | 'Medium' | 'High' | 'Ultra'>(
+    'High'
+  );
+  const [mouseSensitivity, setMouseSensitivity] = useState<number>(1.0);
+  const [cameraSensitivity, setCameraSensitivity] = useState<number>(1.0);
+  const [keyBindings, setKeyBindings] = useState<KeyBindings>(DEFAULT_KEY_BINDINGS);
+  const [autoSwitchMode, setAutoSwitchMode] = useState<AutoSwitchMode>(() => {
+    const saved = localStorage.getItem('fe_auto_switch_mode') as AutoSwitchMode | null;
+    if (saved === 'auto' || saved === 'air_balls' || saved === 'manual') return saved;
+    return 'auto';
+  });
+
+  // Persistent Player Upgrades & Boosts
+  const [playerUpgrades, setPlayerUpgrades] = useState<Record<string, SavedPlayerBoost>>(() => {
+    try {
+      const raw = localStorage.getItem('fe_player_upgrades_v1');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') return parsed;
+      }
+    } catch {
+      // ignore parse errors
+    }
+    return {};
+  });
+
+  // Persistent Shooter Weapons & Upgrades State
+  const [unlockedWeaponIds, setUnlockedWeaponIds] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem('fe_unlocked_weapons_v1');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    return ['wpn_tactical_sidearm'];
+  });
+  const [selectedWeaponId, setSelectedWeaponId] = useState<string>(() => {
+    return localStorage.getItem('fe_selected_weapon_v1') || 'wpn_tactical_sidearm';
+  });
+  const [weaponUpgradeLevels, setWeaponUpgradeLevels] = useState<Record<string, number>>(() => {
+    try {
+      const raw = localStorage.getItem('fe_weapon_upgrade_levels_v1');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') return parsed;
+      }
+    } catch {}
+    return { wpn_tactical_sidearm: 1 };
+  });
+  const [selectedShooterArenaId, setSelectedShooterArenaId] = useState<string>('arena_stadium_hangar');
+  const [selectedOperativeId, setSelectedOperativeId] = useState<string>(() => {
+    return (
+      localStorage.getItem('fe_selected_operative_v1') ||
+      PLAYERS_DB.find((p) => p.initialUnlocked)?.id ||
+      PLAYERS_DB[0].id
+    );
+  });
+
+  const applyBoostToPlayer = (
+    p: FootballPlayer,
+    boosts: Record<string, SavedPlayerBoost>
+  ): FootballPlayer => {
+    const b = boosts[p.id];
+    if (!b) return p;
+    const clampStat = (val: number) => Math.min(99, Math.max(40, val));
+    const clampStars = (val: number) => Math.min(5, Math.max(1, val)) as 1 | 2 | 3 | 4 | 5;
+    return {
+      ...p,
+      rating: clampStat(p.rating + (b.rating || 0)),
+      rarity: b.rarity || p.rarity,
+      attributes: {
+        ...p.attributes,
+        pace: clampStat(p.attributes.pace + (b.pace || 0)),
+        shooting: clampStat(p.attributes.shooting + (b.shooting || 0)),
+        passing: clampStat(p.attributes.passing + (b.passing || 0)),
+        dribbling: clampStat(p.attributes.dribbling + (b.dribbling || 0)),
+        defending: clampStat(p.attributes.defending + (b.defending || 0)),
+        physical: clampStat(p.attributes.physical + (b.physical || 0)),
+        stamina: clampStat((p.attributes.stamina ?? p.attributes.physical) + (b.stamina || 0)),
+        skill: clampStat(p.attributes.skill + (b.skill || 0)),
+        curve: clampStat(p.attributes.curve + (b.curve || 0)),
+        reactions: clampStat(p.attributes.reactions + (b.reactions || 0)),
+        weakFoot: clampStars((p.attributes.weakFoot ?? 4) + (b.weakFoot || 0)),
+        skillMoves: clampStars((p.attributes.skillMoves ?? 4) + (b.skillMoves || 0)),
+      },
+    };
+  };
+
+  const allPlayers = useMemo(
+    () => PLAYERS_DB.map((p) => applyBoostToPlayer(p, playerUpgrades)),
+    [playerUpgrades]
+  );
+
+  const boostedUserSquad = useMemo(
+    () => userSquad.map((p) => applyBoostToPlayer(p, playerUpgrades)),
+    [userSquad, playerUpgrades]
+  );
+
+  // Pre-match Control Guide Modal
+  const [showPreMatchGuide, setShowPreMatchGuide] = useState<boolean>(false);
+  const [hasSeenControlGuide, setHasSeenControlGuide] = useState<boolean>(false);
+  const [inspectedOpponentSquad, setInspectedOpponentSquad] = useState<OpponentSquadInfo | null>(
+    null
+  );
+
+  // Google Auth & App Payment State
+  const [authToken, setAuthToken] = useState<string | null>(() =>
+    localStorage.getItem('fe_auth_token_v3')
+  );
+  const [account, setAccount] = useState<AuthenticatedAccount | null>(() => {
+    try {
+      const raw = localStorage.getItem('fe_saved_account_v3');
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [showGoogleAuthModal, setShowGoogleAuthModal] = useState<boolean>(false);
+  const [checkoutItem, setCheckoutItem] = useState<PaymentCheckoutItem | null>(null);
+  const [showOnlineMatchModal, setShowOnlineMatchModal] = useState<boolean>(false);
+  const [onlineMatchInfo, setOnlineMatchInfo] = useState<OnlineMatchViewportInfo | null>(null);
+
+  // Tournament Progression State
+  const [tournamentStageIndex, setTournamentStageIndex] = useState<number>(() => {
+    const saved = localStorage.getItem('fe_tournament_stage');
+    return saved !== null && !Number.isNaN(Number(saved)) ? Number(saved) : 0;
+  });
+  const [activeTournamentLabel, setActiveTournamentLabel] = useState<string | undefined>(
+    undefined
+  );
+
+  // User Profile & Career Stats (loads saved profile from localStorage)
+  const [profile, setProfile] = useState<UserProfileStats>(() => {
+    try {
+      const savedProfileRaw = localStorage.getItem('fe_profile_stats');
+      if (savedProfileRaw) {
+        const parsed = JSON.parse(savedProfileRaw);
+        if (parsed && typeof parsed.username === 'string') {
+          return parsed;
+        }
+      }
+    } catch {
+      // ignore parse error
+    }
+    const savedName = localStorage.getItem('fe_username') || 'ChampionElite_10';
+    return {
+      username: savedName,
+      level: 14,
+      matchesPlayed: 18,
+      wins: 15,
+      goals: 46,
+      assists: 29,
+      cleanSheets: 9,
+      trophies: 2,
+      unlockedAchievementIds: ['ach_speed_demon', 'ach_sniper', 'ach_champion'],
+    };
+  });
+
+  const applyServerUserProgress = (user: AuthenticatedAccount) => {
+    setAccount(user);
+    localStorage.setItem('fe_saved_account_v3', JSON.stringify(user));
+    if (user.email) {
+      localStorage.setItem('fe_user_email_v3', user.email);
+    }
+    localStorage.setItem('fe_has_onboarded', 'true');
+    if (user.username) {
+      localStorage.setItem('fe_username', user.username);
+    }
+    if (typeof user.coins === 'number') {
+      setCoins(user.coins);
+    }
+    if (user.favouriteClubId) {
+      const club = TEAMS_DB.find((t) => t.id === user.favouriteClubId);
+      if (club) setUserTeam(club);
+    }
+    if (Array.isArray(user.unlockedPlayerIds) && user.unlockedPlayerIds.length > 0) {
+      setUnlockedPlayerIds((prev) =>
+        Array.from(new Set([...prev, ...(user.unlockedPlayerIds || [])]))
+      );
+    }
+    if (Array.isArray(user.squadIds) && user.squadIds.length >= 11) {
+      const resolved = user.squadIds
+        .map((id) => PLAYERS_DB.find((p) => p.id === id))
+        .filter((p): p is FootballPlayer => Boolean(p));
+      if (resolved.length >= 11) {
+        setUserSquad(resolved);
+      }
+    }
+    if (user.formation) {
+      setUserFormation(user.formation as FormationName);
+    }
+    if (user.captainId) {
+      setCaptainId(user.captainId);
+    }
+    if (user.preferredCelebration) {
+      setPreferredCelebration(user.preferredCelebration as CelebrationType);
+    }
+    if (typeof user.tournamentStageIndex === 'number') {
+      setTournamentStageIndex(user.tournamentStageIndex);
+    }
+    setProfile((prev) => ({
+      ...prev,
+      username: user.username || prev.username,
+      matchesPlayed: typeof user.matchesPlayed === 'number' ? user.matchesPlayed : prev.matchesPlayed,
+      wins: typeof user.wins === 'number' ? user.wins : prev.wins,
+      goals: typeof user.goals === 'number' ? user.goals : prev.goals,
+      assists: typeof user.assists === 'number' ? user.assists : prev.assists,
+      cleanSheets: typeof user.cleanSheets === 'number' ? user.cleanSheets : prev.cleanSheets,
+      trophies: typeof user.trophies === 'number' ? user.trophies : prev.trophies,
+      level: typeof user.level === 'number' ? user.level : prev.level,
+      unlockedAchievementIds: Array.isArray(user.unlockedAchievementIds)
+        ? user.unlockedAchievementIds
+        : prev.unlockedAchievementIds,
+    }));
+  };
+
+  const handleCompleteOnboarding = (
+    enteredUsername: string,
+    chosenClub: TeamData,
+    enteredEmail?: string,
+    authenticatedUser?: AuthenticatedAccount,
+    token?: string
+  ) => {
+    localStorage.setItem('fe_has_onboarded', 'true');
+    localStorage.setItem('fe_username', enteredUsername);
+    localStorage.setItem('fe_favourite_club_id', chosenClub.id);
+    setProfile((prev) => ({ ...prev, username: enteredUsername }));
+    setUserTeam(chosenClub);
+    if (awayTeam.id === chosenClub.id) {
+      const alt = TEAMS_DB.find((t) => t.id !== chosenClub.id) || TEAMS_DB[1];
+      setAwayTeam(alt);
+    }
+
+    if (authenticatedUser && token) {
+      setAuthToken(token);
+      localStorage.setItem('fe_auth_token_v3', token);
+      applyServerUserProgress(authenticatedUser);
+      setScreen('home');
+      return;
+    }
+
+    const resolvedEmail =
+      enteredEmail && enteredEmail.includes('@')
+        ? enteredEmail.trim().toLowerCase()
+        : `${enteredUsername.toLowerCase().replace(/[^a-z0-9]/g, '') || 'player'}@gmail.com`;
+
+    const fallbackAccount: AuthenticatedAccount = {
+      id: `usr_${Date.now()}`,
+      googleId: `google_${enteredUsername}`,
+      email: resolvedEmail,
+      username: enteredUsername,
+      avatarUrl: `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(enteredUsername)}`,
+      coins,
+      favouriteClubId: chosenClub.id,
+      unlockedPlayerIds,
+      mmrRating: 1500,
+    };
+    applyServerUserProgress(fallbackAccount);
+
+    fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        provider: 'google',
+        email: resolvedEmail,
+        username: enteredUsername,
+        favouriteClubId: chosenClub.id,
+        initialUnlockedIds: unlockedPlayerIds,
+        coins,
+        squadIds: userSquad.map((p) => p.id),
+        formation: userFormation,
+        captainId,
+        preferredCelebration,
+        tournamentStageIndex,
+      }),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data?.user && data?.token) {
+          setAuthToken(data.token);
+          localStorage.setItem('fe_auth_token_v3', data.token);
+          applyServerUserProgress(data.user);
+        }
+      })
+      .catch(() => {});
+
+    setScreen('home');
+  };
+
+  const handleUpdateUsername = (nextUsername: string) => {
+    const clean = nextUsername.trim().slice(0, 32);
+    if (!clean) return;
+    localStorage.setItem('fe_username', clean);
+    setProfile((prev) => ({ ...prev, username: clean }));
+    if (account) {
+      const updatedAcc = { ...account, username: clean };
+      setAccount(updatedAcc);
+      localStorage.setItem('fe_saved_account_v3', JSON.stringify(updatedAcc));
+    }
+  };
+
+  const navigateTo = (target: ActiveScreen) => {
+    SoundEngine.playUIClick();
+    setScreen(target);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleLaunchMatch = (
+    modeOverride?: MatchModeId,
+    opponentOverride?: TeamData,
+    tourneyLabel?: string
+  ) => {
+    SoundEngine.playUIClick();
+    if (modeOverride) setSelectedMode(modeOverride);
+    if (opponentOverride) setAwayTeam(opponentOverride);
+    setActiveTournamentLabel(tourneyLabel);
+
+    if (!hasSeenControlGuide) {
+      setShowPreMatchGuide(true);
+    } else {
+      setScreen('in_match');
+    }
+  };
+
+  const handleConfirmGuideAndStart = () => {
+    SoundEngine.playUIClick();
+    setHasSeenControlGuide(true);
+    setShowPreMatchGuide(false);
+    setScreen('in_match');
+  };
+
+  const handleLaunchOnlineMatch = (data: OnlineMatchLaunchPayload) => {
+    SoundEngine.playWhistle();
+    setShowOnlineMatchModal(false);
+
+    if (data.opponentClubId) {
+      const oppClub = TEAMS_DB.find((t) => t.id === data.opponentClubId);
+      if (oppClub) setAwayTeam(oppClub);
+    }
+
+    setOnlineMatchInfo({
+      isOnline: true,
+      role: data.role,
+      roomCode: data.roomCode,
+      hostUsername: data.hostUsername,
+      guestUsername: data.guestUsername,
+      matchFormat: data.matchFormat,
+      myTeamSide: data.role === 'host' ? 'home' : 'away',
+      myAssignedSlotIdx: 9,
+      lockToAssignedPlayer: data.matchFormat === '11v11',
+      opponentStarPlayerId: data.opponentStarPlayerId,
+      opponentSquadIds: data.opponentSquadIds,
+      opponentFormation: data.opponentFormation,
+    });
+
+    setSelectedMode(data.matchFormat === '1v1' ? '1v1' : '11v11');
+    setScreen('in_match');
+  };
+
+  // Restore Account session if token or saved email exists (keeps user permanently logged in)
+  useEffect(() => {
+    const savedEmail = localStorage.getItem('fe_user_email_v3') || account?.email || '';
+    if (!authToken && !savedEmail) return;
+    const headers: Record<string, string> = {};
+    if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+    if (savedEmail) headers['x-user-email'] = savedEmail;
+
+    fetch('/api/auth/me', { headers })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data?.user) {
+          applyServerUserProgress(data.user);
+        }
+      })
+      .catch(() => {});
+  }, [authToken]);
+
+  // Initial Comprehensive Hydration: Load all progress from ACID IndexedDB + Server Backup
+  useEffect(() => {
+    let active = true;
+    PersistentDatabaseService.loadComprehensiveSave(authToken, profile.username).then((saved) => {
+      if (!active || !saved) return;
+      if (typeof saved.coins === 'number') {
+        setCoins(saved.coins);
+      }
+      if (typeof saved.walletRupees === 'number') {
+        setWalletRupees(saved.walletRupees);
+      }
+      if (saved.equipment) {
+        if (Array.isArray(saved.equipment.unlockedBallIds) && saved.equipment.unlockedBallIds.length > 0) {
+          setUnlockedBallIds(saved.equipment.unlockedBallIds);
+        }
+        if (saved.equipment.activeBallId) setActiveBallId(saved.equipment.activeBallId);
+        if (Array.isArray(saved.equipment.unlockedJerseyIds) && saved.equipment.unlockedJerseyIds.length > 0) {
+          setUnlockedJerseyIds(saved.equipment.unlockedJerseyIds);
+        }
+        if (saved.equipment.activeJerseyId) setActiveJerseyId(saved.equipment.activeJerseyId);
+        if (Array.isArray(saved.equipment.unlockedBootsIds) && saved.equipment.unlockedBootsIds.length > 0) {
+          setUnlockedBootsIds(saved.equipment.unlockedBootsIds);
+        }
+        if (saved.equipment.activeBootsId) setActiveBootsId(saved.equipment.activeBootsId);
+      }
+      if (saved.favouriteClubId) {
+        const club = TEAMS_DB.find((t) => t.id === saved.favouriteClubId);
+        if (club) setUserTeam(club);
+      }
+      if (saved.formation) {
+        setUserFormation(saved.formation);
+      }
+      if (Array.isArray(saved.unlockedPlayerIds) && saved.unlockedPlayerIds.length > 0) {
+        setUnlockedPlayerIds((prev) => Array.from(new Set([...prev, ...saved.unlockedPlayerIds])));
+      }
+      if (Array.isArray(saved.squadIds) && saved.squadIds.length >= 11) {
+        const resolved = saved.squadIds
+          .map((id) => PLAYERS_DB.find((p) => p.id === id))
+          .filter((p): p is FootballPlayer => Boolean(p));
+        if (resolved.length >= 11) {
+          setUserSquad(resolved);
+        }
+      }
+      if (saved.captainId) setCaptainId(saved.captainId);
+      if (saved.preferredCelebration) setPreferredCelebration(saved.preferredCelebration);
+      if (typeof saved.tournamentStageIndex === 'number') setTournamentStageIndex(saved.tournamentStageIndex);
+      if (saved.profile) setProfile((prev) => ({ ...prev, ...saved.profile }));
+      if (saved.playerUpgrades) setPlayerUpgrades(saved.playerUpgrades);
+      if (saved.weapons) {
+        if (Array.isArray(saved.weapons.unlockedWeaponIds) && saved.weapons.unlockedWeaponIds.length > 0) {
+          setUnlockedWeaponIds(saved.weapons.unlockedWeaponIds);
+        }
+        if (saved.weapons.selectedWeaponId) setSelectedWeaponId(saved.weapons.selectedWeaponId);
+        if (saved.weapons.weaponUpgradeLevels) setWeaponUpgradeLevels(saved.weapons.weaponUpgradeLevels);
+        if (saved.weapons.selectedOperativeId) setSelectedOperativeId(saved.weapons.selectedOperativeId);
+      }
+      if (saved.settings) {
+        if (saved.settings.difficulty) setDifficulty(saved.settings.difficulty);
+        if (saved.settings.cameraMode) setCameraMode(saved.settings.cameraMode);
+        if (saved.settings.controlScheme) setControlScheme(saved.settings.controlScheme);
+        if (saved.settings.graphicsQuality) setGraphicsQuality(saved.settings.graphicsQuality);
+        if (saved.settings.autoSwitchMode) setAutoSwitchMode(saved.settings.autoSwitchMode);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Save all progress permanently to IndexedDB, LocalStorage & Server whenever any state changes
+  useEffect(() => {
+    try {
+      localStorage.setItem('fe_coins', String(coins));
+      localStorage.setItem('fe_wallet_rupees', String(walletRupees));
+      localStorage.setItem('fe_unlocked_balls_v1', JSON.stringify(unlockedBallIds));
+      localStorage.setItem('fe_active_ball_v1', activeBallId);
+      localStorage.setItem('fe_unlocked_jerseys_v1', JSON.stringify(unlockedJerseyIds));
+      localStorage.setItem('fe_active_jersey_v1', activeJerseyId);
+      localStorage.setItem('fe_unlocked_boots_v1', JSON.stringify(unlockedBootsIds));
+      localStorage.setItem('fe_active_boots_v1', activeBootsId);
+      localStorage.setItem('fe_favourite_club_id', userTeam.id);
+      localStorage.setItem('fe_formation', userFormation);
+      localStorage.setItem('fe_unlocked_player_ids', JSON.stringify(unlockedPlayerIds));
+      localStorage.setItem('fe_squad_ids', JSON.stringify(userSquad.map((p) => p.id)));
+      localStorage.setItem('fe_captain_id', captainId);
+      localStorage.setItem('fe_celebration', preferredCelebration);
+      localStorage.setItem('fe_tournament_stage', String(tournamentStageIndex));
+      localStorage.setItem('fe_profile_stats', JSON.stringify(profile));
+      localStorage.setItem('fe_username', profile.username);
+      localStorage.setItem('fe_auto_switch_mode', autoSwitchMode);
+      localStorage.setItem('fe_player_upgrades_v1', JSON.stringify(playerUpgrades));
+      localStorage.setItem('fe_unlocked_weapons_v1', JSON.stringify(unlockedWeaponIds));
+      localStorage.setItem('fe_selected_weapon_v1', selectedWeaponId);
+      localStorage.setItem('fe_weapon_upgrade_levels_v1', JSON.stringify(weaponUpgradeLevels));
+      localStorage.setItem('fe_selected_operative_v1', selectedOperativeId);
+    } catch {
+      // ignore storage quota errors
+    }
+
+    const fullSave: GameSaveState = {
+      version: 2,
+      updatedAt: Date.now(),
+      deviceId: localStorage.getItem('fe_device_unique_id') || 'dev_client',
+      userId: account?.id,
+      username: profile.username,
+      coins,
+      walletRupees,
+      equipment: {
+        unlockedBallIds,
+        activeBallId,
+        unlockedJerseyIds,
+        activeJerseyId,
+        unlockedBootsIds,
+        activeBootsId,
+      },
+      favouriteClubId: userTeam.id,
+      unlockedPlayerIds,
+      squadIds: userSquad.map((p) => p.id),
+      formation: userFormation,
+      captainId,
+      preferredCelebration,
+      tournamentStageIndex,
+      profile,
+      playerUpgrades,
+      weapons: {
+        unlockedWeaponIds,
+        selectedWeaponId,
+        weaponUpgradeLevels,
+        selectedOperativeId,
+      },
+      settings: {
+        difficulty,
+        cameraMode,
+        controlScheme,
+        graphicsQuality,
+        mouseSensitivity,
+        cameraSensitivity,
+        keyBindings,
+        autoSwitchMode,
+        audio: SoundEngine.settings,
+      },
+    };
+
+    PersistentDatabaseService.autoSave(fullSave, authToken);
+
+    const savedEmail = localStorage.getItem('fe_user_email_v3') || account?.email || '';
+    if (!authToken && !savedEmail) return;
+
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+    if (savedEmail) headers['x-user-email'] = savedEmail;
+
+    fetch('/api/user/sync', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        email: savedEmail || undefined,
+        username: profile.username,
+        coins,
+        favouriteClubId: userTeam.id,
+        unlockedPlayerIds,
+        squadIds: userSquad.map((p) => p.id),
+        formation: userFormation,
+        captainId,
+        preferredCelebration,
+        tournamentStageIndex,
+        matchesPlayed: profile.matchesPlayed,
+        wins: profile.wins,
+        goals: profile.goals,
+        assists: profile.assists,
+        cleanSheets: profile.cleanSheets,
+        trophies: profile.trophies,
+        level: profile.level,
+        unlockedAchievementIds: profile.unlockedAchievementIds,
+      }),
+    }).catch(() => {});
+  }, [
+    authToken,
+    account?.email,
+    profile,
+    coins,
+    userTeam.id,
+    userFormation,
+    unlockedPlayerIds,
+    userSquad,
+    captainId,
+    preferredCelebration,
+    tournamentStageIndex,
+    autoSwitchMode,
+    playerUpgrades,
+    unlockedWeaponIds,
+    selectedWeaponId,
+    weaponUpgradeLevels,
+    selectedOperativeId,
+    difficulty,
+    cameraMode,
+    controlScheme,
+    graphicsQuality,
+    mouseSensitivity,
+    cameraSensitivity,
+    keyBindings,
+  ]);
+
+  const handleMatchComplete = (result: {
+    homeScore: number;
+    awayScore: number;
+    stats: MatchHUDState['stats'];
+    coinsEarned: number;
+  }) => {
+    setCoins((c) => c + result.coinsEarned);
+
+    // CHECKPOINT: Auto-credit ₹5,00,000 to in-game wallet after every completed match!
+    const MATCH_REWARD_RUPEES = 500000;
+    setWalletRupees((r) => {
+      const next = r + MATCH_REWARD_RUPEES;
+      try {
+        localStorage.setItem('fe_wallet_rupees', String(next));
+      } catch {}
+      return next;
+    });
+    const won = result.homeScore >= result.awayScore;
+
+    setProfile((prev) => {
+      const nextAch = new Set(prev.unlockedAchievementIds);
+      if (result.homeScore >= 3) nextAch.add('ach_hat_trick');
+      if (result.awayScore === 0 || result.stats.homeSaves >= 5) nextAch.add('ach_wall');
+      if (activeTournamentLabel && tournamentStageIndex >= 6 && won) {
+        nextAch.add('ach_world_champ');
+      }
+
+      return {
+        ...prev,
+        level: prev.level + 1,
+        matchesPlayed: prev.matchesPlayed + 1,
+        wins: prev.wins + (won ? 1 : 0),
+        goals: prev.goals + result.homeScore,
+        assists: prev.assists + Math.max(0, result.homeScore - 1),
+        cleanSheets: prev.cleanSheets + (result.awayScore === 0 ? 1 : 0),
+        trophies:
+          prev.trophies + (activeTournamentLabel && tournamentStageIndex === 6 && won ? 1 : 0),
+        unlockedAchievementIds: Array.from(nextAch),
+      };
+    });
+
+    if (activeTournamentLabel && won) {
+      setTournamentStageIndex((idx) => Math.min(7, idx + 1));
+    }
+  };
+
+  const handleSpendRupees = (amount: number, reason: string): boolean => {
+    if (walletRupees < amount) {
+      SoundEngine.playWhistle('foul');
+      return false;
+    }
+    setWalletRupees((prev) => {
+      const next = Math.max(0, prev - amount);
+      try {
+        localStorage.setItem('fe_wallet_rupees', String(next));
+      } catch {}
+      return next;
+    });
+    return true;
+  };
+
+  const handleSpendCoins = (amount: number, reason: string): boolean => {
+    if (coins < amount) {
+      SoundEngine.playWhistle('foul');
+      return false;
+    }
+    setCoins((prev) => {
+      const next = Math.max(0, prev - amount);
+      try {
+        localStorage.setItem('fe_coins', String(next));
+      } catch {}
+      return next;
+    });
+    return true;
+  };
+
+  const handleUnlockBall = (ballId: string, paidRupees: boolean) => {
+    setUnlockedBallIds((prev) => {
+      if (prev.includes(ballId)) return prev;
+      const next = [...prev, ballId];
+      try {
+        localStorage.setItem('fe_unlocked_balls_v1', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+    setActiveBallId(ballId);
+    try {
+      localStorage.setItem('fe_active_ball_v1', ballId);
+    } catch {}
+  };
+
+  const handleUnlockJersey = (jerseyId: string, paidRupees: boolean) => {
+    setUnlockedJerseyIds((prev) => {
+      if (prev.includes(jerseyId)) return prev;
+      const next = [...prev, jerseyId];
+      try {
+        localStorage.setItem('fe_unlocked_jerseys_v1', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+    setActiveJerseyId(jerseyId);
+    try {
+      localStorage.setItem('fe_active_jersey_v1', jerseyId);
+    } catch {}
+  };
+
+  const handleUnlockBoots = (bootsId: string, paidRupees: boolean) => {
+    setUnlockedBootsIds((prev) => {
+      if (prev.includes(bootsId)) return prev;
+      const next = [...prev, bootsId];
+      try {
+        localStorage.setItem('fe_unlocked_boots_v1', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+    setActiveBootsId(bootsId);
+    try {
+      localStorage.setItem('fe_active_boots_v1', bootsId);
+    } catch {}
+  };
+
+  const placeNewPlayerInMatchingPosition = (
+    prevSquad: FootballPlayer[],
+    newPlayer: FootballPlayer,
+    formation: FormationName
+  ): FootballPlayer[] => {
+    // 1. Ensure base squad has at least 11 players
+    const starterUnlocked = PLAYERS_DB.filter((p) => p.initialUnlocked);
+    const base = prevSquad.length >= 11 ? prevSquad : [...prevSquad, ...starterUnlocked].slice(0, 11);
+    const copy = [...base];
+    const bestSlotIdx = findBestSlotIndexForPlayer(newPlayer, formation, copy.slice(0, 11));
+    const existingIdx = copy.findIndex((p) => p.id === newPlayer.id);
+
+    // If player is already sitting in their exact optimal starting position, return
+    if (existingIdx === bestSlotIdx) {
+      return copy;
+    }
+
+    const displaced = copy[bestSlotIdx];
+    copy[bestSlotIdx] = newPlayer;
+
+    if (existingIdx >= 0 && existingIdx < 11) {
+      // Swapping within Starting XI (e.g. was playing out of position)
+      if (displaced && displaced.id !== newPlayer.id) {
+        copy[existingIdx] = displaced;
+      }
+    } else if (existingIdx >= 11) {
+      // Moving up from bench/reserves into Starting XI
+      if (displaced && displaced.id !== newPlayer.id) {
+        copy[existingIdx] = displaced;
+      } else {
+        copy.splice(existingIdx, 1);
+      }
+    } else {
+      // Newly signed/unlocked player — push displaced starting player into reserves
+      if (displaced && displaced.id !== newPlayer.id) {
+        copy.splice(11, 0, displaced);
+      }
+    }
+
+    return copy.filter(Boolean);
+  };
+
+  const handleApplyUpgradeCard = (card: UpgradeCardItem, targetPlayerId: string) => {
+    if (coins < card.price) return;
+    SoundEngine.playPackOpen();
+    setCoins((c) => Math.max(0, c - card.price));
+    setPlayerUpgrades((prev) => {
+      const curr = prev[targetPlayerId] || {};
+      return {
+        ...prev,
+        [targetPlayerId]: {
+          pace: (curr.pace || 0) + (card.statBonuses.pace || 0),
+          shooting: (curr.shooting || 0) + (card.statBonuses.shooting || 0),
+          passing: (curr.passing || 0) + (card.statBonuses.passing || 0),
+          dribbling: (curr.dribbling || 0) + (card.statBonuses.dribbling || 0),
+          defending: (curr.defending || 0) + (card.statBonuses.defending || 0),
+          physical: (curr.physical || 0) + (card.statBonuses.physical || 0),
+          stamina: (curr.stamina || 0) + (card.statBonuses.stamina || 0),
+          skill: (curr.skill || 0) + (card.statBonuses.skill || 0),
+          curve: (curr.curve || 0) + (card.statBonuses.curve || 0),
+          reactions: (curr.reactions || 0) + (card.statBonuses.reactions || 0),
+          rating: (curr.rating || 0) + (card.ratingBonus || 0),
+          weakFoot: (curr.weakFoot || 0) + (card.statBonuses.weakFoot || 0),
+          skillMoves: (curr.skillMoves || 0) + (card.statBonuses.skillMoves || 0),
+          rarity: card.upgradeRarityTo || curr.rarity,
+        },
+      };
+    });
+  };
+
+  const handleBuyPlayer = (player: FootballPlayer) => {
+    if (coins < player.price || unlockedPlayerIds.includes(player.id)) return;
+    SoundEngine.playPackOpen();
+    setCoins((c) => c - player.price);
+    setUnlockedPlayerIds((prev) => (prev.includes(player.id) ? prev : [...prev, player.id]));
+    // Place newly unlocked player directly into their matching position slot (e.g., LB -> LB slot, ST -> ST slot)
+    setUserSquad((prev) => placeNewPlayerInMatchingPosition(prev, player, userFormation));
+    setProfile((prev) => ({
+      ...prev,
+      unlockedAchievementIds: Array.from(
+        new Set([...prev.unlockedAchievementIds, 'ach_transfer_mogul'])
+      ),
+    }));
+  };
+
+  const handleOpenPack = (pack: PackDefinition, pulledPlayer: FootballPlayer) => {
+    setCoins((c) => Math.max(0, c - pack.price));
+    setUnlockedPlayerIds((prev) =>
+      prev.includes(pulledPlayer.id) ? prev : [...prev, pulledPlayer.id]
+    );
+    setUserSquad((prev) => placeNewPlayerInMatchingPosition(prev, pulledPlayer, userFormation));
+  };
+
+  const handleSpinRoulette = (costCoins: number, pulledPlayer: FootballPlayer) => {
+    setCoins((c) => Math.max(0, c - costCoins));
+    setUnlockedPlayerIds((prev) =>
+      prev.includes(pulledPlayer.id) ? prev : [...prev, pulledPlayer.id]
+    );
+    setUserSquad((prev) => placeNewPlayerInMatchingPosition(prev, pulledPlayer, userFormation));
+  };
+
+  // Show Welcome Username & Favourite Club Selection Screen at the very beginning
+  if (screen === 'welcome') {
+    return (
+      <>
+        <WelcomeOnboardingScreen
+          initialUsername={profile.username}
+          initialEmail=""
+          initialClub={userTeam}
+          starterSquad={userSquad}
+          coins={coins}
+          isGoogleLinked={Boolean(account)}
+          onOpenGoogleAuth={() => setShowGoogleAuthModal(true)}
+          onContinueAsGuest={() => setScreen('home')}
+          onCompleteOnboarding={handleCompleteOnboarding}
+        />
+        <GoogleAuthModal
+          isOpen={showGoogleAuthModal}
+          currentUsername={profile.username}
+          currentClubId={userTeam.id}
+          unlockedPlayerIds={unlockedPlayerIds}
+          account={account}
+          onClose={() => setShowGoogleAuthModal(false)}
+          onSuccessAuth={(acc, token) => {
+            setAuthToken(token);
+            localStorage.setItem('fe_auth_token_v3', token);
+            applyServerUserProgress(acc);
+            setScreen('home');
+          }}
+          onLogout={() => {
+            setAccount(null);
+            setAuthToken(null);
+            localStorage.removeItem('fe_auth_token_v3');
+            localStorage.removeItem('fe_user_email_v3');
+            localStorage.removeItem('fe_saved_account_v3');
+          }}
+        />
+      </>
+    );
+  }
+
+  // Fullscreen 3D Match Viewport when playing
+  if (screen === 'in_match') {
+    return (
+      <MatchViewport3D
+        username={profile.username}
+        homeTeam={userTeam}
+        awayTeam={awayTeam}
+        homeSquad={boostedUserSquad}
+        homeFormation={userFormation}
+        stadium={selectedStadium}
+        weather={selectedWeather}
+        mode={selectedMode}
+        difficulty={difficulty}
+        initialCamera={cameraMode}
+        controlScheme={controlScheme}
+        graphicsQuality={graphicsQuality}
+        preferredCelebration={preferredCelebration}
+        keyBindings={keyBindings}
+        mouseSensitivity={mouseSensitivity}
+        cameraSensitivity={cameraSensitivity}
+        autoSwitchMode={autoSwitchMode}
+        onChangeAutoSwitchMode={setAutoSwitchMode}
+        tournamentStageLabel={activeTournamentLabel}
+        onlineMatchInfo={onlineMatchInfo || undefined}
+        activeBallId={activeBallId}
+        activeJerseyId={activeJerseyId}
+        activeBootsId={activeBootsId}
+        onMatchComplete={handleMatchComplete}
+        onNextMatch={
+          onlineMatchInfo
+            ? () => {
+                setOnlineMatchInfo(null);
+                setShowOnlineMatchModal(true);
+                navigateTo('home');
+              }
+            : activeTournamentLabel
+            ? () => {
+                setScreen('world_cup');
+              }
+            : () => {
+                const others = TEAMS_DB.filter((t) => t.id !== awayTeam.id && t.id !== userTeam.id);
+                const nextOpp = others[Math.floor(Math.random() * others.length)] || TEAMS_DB[2];
+                setAwayTeam(nextOpp);
+                setScreen('play_setup');
+              }
+        }
+        onExitToMenu={() => {
+          setOnlineMatchInfo(null);
+          navigateTo('home');
+        }}
+      />
+    );
+  }
+
+  // Fullscreen 3D Mobile Shooter Battle Viewport
+  if (screen === 'shooter_match') {
+    const selectedWeapon =
+      WEAPONS_ARMORY.find((w) => w.id === selectedWeaponId) || WEAPONS_ARMORY[0];
+    const selectedOperative =
+      allPlayers.find((p) => p.id === selectedOperativeId) || userSquad[0] || allPlayers[0];
+    const opponentCandidates = allPlayers.filter((p) => p.id !== selectedOperative.id);
+
+    return (
+      <ShooterMatchViewport3D
+        player={selectedOperative}
+        weapon={selectedWeapon}
+        weaponLevel={weaponUpgradeLevels[selectedWeapon.id] || 1}
+        arenaId={selectedShooterArenaId}
+        opponentPlayers={opponentCandidates}
+        onFinishMatch={(rewardCoins, killsCount, combatScore) => {
+          setCoins((c) => c + rewardCoins);
+          setWalletRupees((r) => {
+            const next = r + 500000;
+            try {
+              localStorage.setItem('fe_wallet_rupees', String(next));
+            } catch {}
+            return next;
+          });
+          setProfile((prev) => ({
+            ...prev,
+            matchesPlayed: prev.matchesPlayed + 1,
+            wins: prev.wins + 1,
+            goals: prev.goals + killsCount, // accumulate kills in profile stats
+          }));
+          setScreen('armory_hub');
+        }}
+        onExitToHub={() => setScreen('armory_hub')}
+      />
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-[#070A0E] text-[#F1F5F9] flex flex-col">
+      {/* STRICT 3-ZONE TOP BAR CONTRACT */}
+      <header className="sticky top-0 z-30 flex items-center justify-between px-6 py-3.5 bg-[#070A0E]/90 backdrop-blur-md border-b border-white/10">
+        {/* Zone 1: Brand App Icon + Wordmark */}
+        <div className="flex items-center gap-3 shrink-0">
+          <button
+            onClick={() => navigateTo('home')}
+            className="flex items-center gap-3 cursor-pointer"
+          >
+            <div className="w-11 h-11 rounded-full bg-[#111722] border border-[#F59E0B]/60 flex items-center justify-center overflow-hidden shadow-md shrink-0">
+              <img
+                src={iconUrl}
+                alt="Football Elite Logo"
+                referrerPolicy="no-referrer"
+                className="w-full h-full object-cover scale-105"
+              />
+            </div>
+            <span className="font-display text-xl font-bold tracking-tight text-white text-left whitespace-nowrap shrink-0">
+              FOOTBALL ELITE
+            </span>
+          </button>
+        </div>
+
+        {/* Zone 2: 5 single-line clean text navigation links */}
+        <nav className="hidden lg:flex items-center gap-7 text-sm font-medium text-slate-300">
+          <button
+            onClick={() => navigateTo('transfer_market')}
+            className={`hover:text-white transition-colors whitespace-nowrap cursor-pointer ${
+              screen === 'transfer_market' || screen === 'packs'
+                ? 'text-[#F59E0B] font-semibold'
+                : ''
+            }`}
+          >
+            Player Market ({allPlayers.length})
+          </button>
+          <button
+            onClick={() => navigateTo('upgrades')}
+            className={`hover:text-white transition-colors whitespace-nowrap cursor-pointer ${
+              screen === 'upgrades' ? 'text-[#EC4899] font-semibold' : ''
+            }`}
+          >
+            Cards & Upgrades
+          </button>
+          <button
+            onClick={() => navigateTo('spin_roulette')}
+            className={`hover:text-white transition-colors whitespace-nowrap cursor-pointer ${
+              screen === 'spin_roulette' ? 'text-[#F59E0B] font-semibold' : 'text-[#F59E0B]'
+            }`}
+          >
+            Spin / Draw
+          </button>
+          <button
+            onClick={() => navigateTo('my_team')}
+            className={`hover:text-white transition-colors whitespace-nowrap cursor-pointer ${
+              screen === 'my_team' ? 'text-[#10B981] font-semibold' : ''
+            }`}
+          >
+            Dream Team (11v11)
+          </button>
+          <button
+            onClick={() => navigateTo('armory_hub')}
+            className={`hover:text-white transition-colors whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+              screen === 'armory_hub' ? 'text-red-500 font-bold' : 'text-red-400 font-semibold'
+            }`}
+          >
+            <Crosshair className="w-4 h-4 animate-pulse text-red-500" />
+            3D Shooting & Weapons
+          </button>
+          <button
+            onClick={() => navigateTo('world_cup')}
+            className={`hover:text-white transition-colors whitespace-nowrap cursor-pointer ${
+              screen === 'world_cup' || screen === 'tournaments'
+                ? 'text-[#F59E0B] font-semibold'
+                : ''
+            }`}
+          >
+            World Cup
+          </button>
+          <button
+            onClick={() => {
+              SoundEngine.playUIClick();
+              setIsWalletLockerOpen(true);
+            }}
+            className="hover:text-white transition-colors whitespace-nowrap cursor-pointer text-emerald-400 font-semibold flex items-center gap-1.5"
+            title="Open Equipment Locker: Match balls, jerseys, boots & celebrations"
+          >
+            <span className="w-3.5 h-3.5 rounded-full bg-emerald-400 text-slate-950 text-[10px] font-black flex items-center justify-center">₹</span>
+            Wallet & Locker
+          </button>
+        </nav>
+
+        {/* Zone 3: Primary Actions (Online Match + Sign-In + PLAY MATCH) */}
+        <div className="flex items-center gap-2.5">
+          <button
+            onClick={() => {
+              SoundEngine.playUIClick();
+              setShowOnlineMatchModal(true);
+            }}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#38BDF8]/15 hover:bg-[#38BDF8]/25 text-[#38BDF8] border border-[#38BDF8]/40 font-display font-bold text-xs transition-all whitespace-nowrap shrink-0 cursor-pointer shadow-sm shadow-[#38BDF8]/15"
+          >
+            <Globe className="w-3.5 h-3.5" />
+            ONLINE MATCH
+          </button>
+
+          {/* In-Game Wallet (Earn ₹5,00,000 every completed match) */}
+          <button
+            onClick={() => {
+              SoundEngine.playUIClick();
+              setIsWalletLockerOpen(true);
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-xs font-mono font-bold text-emerald-400 transition-all cursor-pointer shadow-sm shadow-emerald-500/10"
+            title="In-Game Wallet: Earn ₹5,00,000 after every completed match! Click to open Wallet & Equipment Locker"
+          >
+            <span className="w-4 h-4 rounded-full bg-emerald-500 text-slate-950 font-black text-[11px] flex items-center justify-center">₹</span>
+            <span>{'₹' + walletRupees.toLocaleString('en-IN')}</span>
+          </button>
+
+          <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#111722] border border-[#F59E0B]/30 text-xs font-mono font-bold text-[#F59E0B]">
+            <Coins className="w-3.5 h-3.5" />
+            {coins.toLocaleString()}
+          </div>
+          <div
+            className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#10B981]/10 border border-[#10B981]/30 text-[10px] font-mono text-[#10B981]"
+            title="Auto-Save: Permanently synchronized to ACID database"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-[#10B981] animate-pulse" />
+            <span className="font-bold">AUTO-SAVED</span>
+          </div>
+          <button
+            onClick={() => setShowGoogleAuthModal(true)}
+            className="px-3.5 py-2 text-xs font-display font-bold text-white bg-[#111722] border border-white/15 rounded-lg hover:border-[#10B981] transition-colors whitespace-nowrap shrink-0 flex items-center gap-2 cursor-pointer"
+          >
+            <span className="w-4 h-4 rounded-full bg-white text-[#070A0E] flex items-center justify-center text-[10px] font-bold">
+              G
+            </span>
+            {account ? `@${account.username} ✓` : 'Sign In'}
+          </button>
+          <button
+            onClick={() => navigateTo('play_setup')}
+            className="px-4 py-2 text-xs font-display font-bold text-[#070A0E] bg-[#10B981] rounded-lg hover:bg-[#059669] transition-colors whitespace-nowrap shrink-0 cursor-pointer flex items-center gap-1.5"
+          >
+            <Play className="w-3.5 h-3.5 fill-current" />
+            PLAY MATCH
+          </button>
+        </div>
+      </header>
+
+      {/* Mobile-Friendly Quick Nav Strip */}
+      <div className="lg:hidden flex items-center gap-2 overflow-x-auto px-4 py-2.5 bg-[#111722] border-b border-white/10 text-xs font-display font-bold">
+        <button
+          onClick={() => {
+            SoundEngine.playUIClick();
+            setIsWalletLockerOpen(true);
+          }}
+          className="px-3 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center gap-1.5 shrink-0 font-mono"
+        >
+          <span className="w-3.5 h-3.5 rounded-full bg-emerald-500 text-slate-950 font-black text-[10px] flex items-center justify-center">₹</span>
+          <span>{'₹' + walletRupees.toLocaleString('en-IN')}</span>
+        </button>
+        <button
+          onClick={() => {
+            SoundEngine.playUIClick();
+            setShowOnlineMatchModal(true);
+          }}
+          className="px-3 py-1.5 rounded-lg whitespace-nowrap bg-[#38BDF8]/20 text-[#38BDF8] border border-[#38BDF8]/40 font-display font-bold text-xs flex items-center gap-1.5 shrink-0 cursor-pointer"
+        >
+          <Globe className="w-3.5 h-3.5" />
+          Online Match
+        </button>
+        <button
+          onClick={() => navigateTo('armory_hub')}
+          className={`px-3 py-1.5 rounded-lg whitespace-nowrap flex items-center gap-1.5 cursor-pointer ${
+            screen === 'armory_hub' ? 'bg-red-500 text-white font-bold' : 'bg-red-950/40 text-red-400 border border-red-500/40'
+          }`}
+        >
+          <Crosshair className="w-3.5 h-3.5" />
+          3D Shooting & Guns
+        </button>
+        <button
+          onClick={() => navigateTo('play_setup')}
+          className={`px-3 py-1.5 rounded-lg whitespace-nowrap ${
+            screen === 'play_setup' ? 'bg-[#10B981] text-[#070A0E]' : 'text-slate-300'
+          }`}
+        >
+          Play Match
+        </button>
+        <button
+          onClick={() => navigateTo('transfer_market')}
+          className={`px-3 py-1.5 rounded-lg whitespace-nowrap ${
+            screen === 'transfer_market' ? 'bg-[#F59E0B] text-[#070A0E]' : 'text-slate-300'
+          }`}
+        >
+          Player Market ({allPlayers.length})
+        </button>
+        <button
+          onClick={() => navigateTo('upgrades')}
+          className={`px-3 py-1.5 rounded-lg whitespace-nowrap ${
+            screen === 'upgrades' ? 'bg-[#EC4899] text-white' : 'text-[#EC4899]'
+          }`}
+        >
+          Cards & Upgrades
+        </button>
+        <button
+          onClick={() => navigateTo('spin_roulette')}
+          className={`px-3 py-1.5 rounded-lg whitespace-nowrap ${
+            screen === 'spin_roulette' ? 'bg-[#F59E0B] text-[#070A0E]' : 'text-[#F59E0B]'
+          }`}
+        >
+          Spin / Draw
+        </button>
+        <button
+          onClick={() => navigateTo('my_team')}
+          className={`px-3 py-1.5 rounded-lg whitespace-nowrap ${
+            screen === 'my_team' ? 'bg-[#10B981] text-[#070A0E]' : 'text-slate-300'
+          }`}
+        >
+          Dream Team (11v11)
+        </button>
+        <button
+          onClick={() => navigateTo('world_cup')}
+          className={`px-3 py-1.5 rounded-lg whitespace-nowrap ${
+            screen === 'world_cup' ? 'bg-[#F59E0B] text-[#070A0E]' : 'text-slate-300'
+          }`}
+        >
+          World Cup
+        </button>
+        <button
+          onClick={() => navigateTo('settings')}
+          className={`px-3 py-1.5 rounded-lg whitespace-nowrap ${
+            screen === 'settings' ? 'bg-white text-[#070A0E]' : 'text-slate-300'
+          }`}
+        >
+          Controls
+        </button>
+      </div>
+
+      {/* MAIN CONTENT ROUTER */}
+      <main className="flex-1">
+        {/* SCREEN 1: HOMEPAGE */}
+        {screen === 'home' && (
+          <div className="space-y-14 pb-16">
+            {/* HERO SECTION */}
+            <section className="relative min-h-[580px] flex items-center border-b border-white/10 overflow-hidden">
+              {/* Stadium Floodlight Backdrop Image */}
+              <img
+                src={heroStadiumImg}
+                alt="Football Elite Stadium at Night"
+                referrerPolicy="no-referrer"
+                className="absolute inset-0 w-full h-full object-cover opacity-50"
+              />
+              <div className="absolute inset-0 bg-gradient-to-r from-[#070A0E] via-[#070A0E]/85 to-transparent" />
+              <div className="absolute inset-0 bg-gradient-to-t from-[#070A0E] via-transparent to-transparent" />
+
+              <div className="relative z-10 max-w-7xl mx-auto px-6 py-12 w-full grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
+                {/* Left 7 Cols: Brand Hero & Main Buttons */}
+                <div className="lg:col-span-7 space-y-6">
+                  <div className="flex items-center gap-4">
+                    <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-full bg-[#111722]/90 border-2 border-[#F59E0B]/60 shadow-[0_0_35px_rgba(245,158,11,0.3)] flex items-center justify-center overflow-hidden shrink-0">
+                      <img
+                        src={iconUrl}
+                        alt="Football Elite App Logo"
+                        referrerPolicy="no-referrer"
+                        className="w-full h-full object-cover scale-105"
+                      />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-xs font-mono text-[#10B981] tracking-widest">
+                          WORLD OF CHAMPIONS · 60 FPS 3D WEBGL ENGINE
+                        </span>
+                      </div>
+                      <h1 className="font-display text-5xl sm:text-6xl font-bold tracking-tight text-white leading-none">
+                        FOOTBALL ELITE
+                      </h1>
+                    </div>
+                  </div>
+
+                  <p className="font-display text-xl sm:text-2xl font-semibold text-[#F59E0B] tracking-wide">
+                    PLAY. COMPETE. CONQUER.
+                  </p>
+
+                  <p className="text-sm sm:text-base text-slate-300 max-w-xl leading-relaxed">
+                    Experience authentic 3D stadium football with realistic player faces, precision passing & through balls, Magnus finesse shots, overhead volleys, player upgrade cards, and a full Coin Transfer Market.
+                  </p>
+
+                  {/* Primary Hero CTA Grid (Neatly arranged layout) */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
+                    <button
+                      onClick={() => {
+                        SoundEngine.playGunshot('rifle');
+                        navigateTo('armory_hub');
+                      }}
+                      className="col-span-2 sm:col-span-4 py-4 px-6 bg-gradient-to-r from-red-600 via-rose-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white font-display font-black text-sm sm:text-base rounded-2xl transition-all flex items-center justify-center gap-3 shadow-xl shadow-red-600/30 whitespace-nowrap cursor-pointer border border-red-400/30 hover:scale-[1.01] active:scale-[0.99]"
+                    >
+                      <Crosshair className="w-5 h-5 animate-pulse text-amber-300" />
+                      PLAY 3D SHOOTING BATTLE (MOBILE TOUCH & WEAPONS)
+                    </button>
+
+                    <button
+                      onClick={() => navigateTo('play_setup')}
+                      className="col-span-1 sm:col-span-2 py-3.5 px-5 bg-[#10B981] hover:bg-[#059669] text-[#070A0E] font-display font-bold text-xs sm:text-sm rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg whitespace-nowrap cursor-pointer"
+                    >
+                      <Play className="w-4 h-4 fill-current" />
+                      PLAY MATCH NOW
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        SoundEngine.playUIClick();
+                        setShowOnlineMatchModal(true);
+                      }}
+                      className="col-span-1 sm:col-span-2 py-3.5 px-5 bg-gradient-to-r from-[#38BDF8] to-[#0284C7] hover:from-[#0284C7] hover:to-[#0369A1] text-white font-display font-bold text-xs sm:text-sm rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-[#38BDF8]/20 whitespace-nowrap cursor-pointer"
+                    >
+                      <Globe className="w-4 h-4" />
+                      ONLINE MATCH (ROOM CODE)
+                    </button>
+
+                    <button
+                      onClick={() => navigateTo('world_cup')}
+                      className="col-span-1 sm:col-span-2 py-3.5 px-5 bg-[#F59E0B] hover:bg-[#D97706] text-[#070A0E] font-display font-bold text-xs sm:text-sm rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg whitespace-nowrap cursor-pointer"
+                    >
+                      <Trophy className="w-4 h-4" />
+                      WORLD CUP TOURNAMENT
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        SoundEngine.playUIClick();
+                        setIsWalletLockerOpen(true);
+                      }}
+                      className="col-span-2 sm:col-span-4 py-3.5 px-5 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-500 text-white font-display font-bold text-xs sm:text-sm rounded-xl transition-all flex items-center justify-center gap-2.5 shadow-lg shadow-emerald-500/20 whitespace-nowrap cursor-pointer border border-emerald-400/40"
+                    >
+                      <span className="w-5 h-5 rounded-full bg-emerald-400 text-slate-950 font-black text-xs flex items-center justify-center shadow">₹</span>
+                      IN-GAME WALLET & EQUIPMENT LOCKER ({'₹' + walletRupees.toLocaleString('en-IN')})
+                      <span className="text-[11px] font-mono text-emerald-200 bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-400/30">+₹5,00,000 PER MATCH</span>
+                    </button>
+
+                    <button
+                      onClick={() => handleLaunchMatch('quick_match')}
+                      className="py-3 px-4 bg-[#111722]/90 hover:bg-[#192231] border border-white/15 rounded-xl font-display font-semibold text-xs text-white transition-colors whitespace-nowrap cursor-pointer"
+                    >
+                      QUICK MATCH
+                    </button>
+
+                    <button
+                      onClick={() => navigateTo('transfer_market')}
+                      className="py-3 px-4 bg-[#111722]/90 hover:bg-[#192231] border border-[#F59E0B]/40 rounded-xl font-display font-semibold text-xs text-[#F59E0B] transition-colors whitespace-nowrap cursor-pointer"
+                    >
+                      PLAYER MARKET ({allPlayers.length})
+                    </button>
+
+                    <button
+                      onClick={() => navigateTo('upgrades')}
+                      className="py-3 px-4 bg-[#111722]/90 hover:bg-[#192231] border border-[#EC4899]/50 rounded-xl font-display font-semibold text-xs text-[#EC4899] transition-colors whitespace-nowrap cursor-pointer"
+                    >
+                      CARDS & UPGRADES
+                    </button>
+
+                    <button
+                      onClick={() => navigateTo('my_team')}
+                      className="py-3 px-4 bg-[#111722]/90 hover:bg-[#192231] border border-[#10B981]/50 rounded-xl font-display font-semibold text-xs text-[#10B981] transition-colors whitespace-nowrap cursor-pointer"
+                    >
+                      DREAM TEAM (11V11)
+                    </button>
+
+                    <button
+                      onClick={() => navigateTo('spin_roulette')}
+                      className="py-3 px-4 bg-gradient-to-r from-[#F59E0B]/20 to-[#F59E0B]/10 hover:from-[#F59E0B] hover:to-[#D97706] border border-[#F59E0B] rounded-xl font-display font-bold text-xs text-[#F59E0B] hover:text-[#070A0E] transition-all whitespace-nowrap cursor-pointer"
+                    >
+                      SPIN / DRAW CARDS
+                    </button>
+
+                    <button
+                      onClick={() => navigateTo('tournaments')}
+                      className="py-3 px-4 bg-[#111722]/90 hover:bg-[#192231] border border-white/15 rounded-xl font-display font-semibold text-xs text-white transition-colors whitespace-nowrap cursor-pointer"
+                    >
+                      TOURNAMENTS
+                    </button>
+
+                    <button
+                      onClick={() => navigateTo('packs')}
+                      className="py-3 px-4 bg-[#111722]/90 hover:bg-[#192231] border border-white/15 rounded-xl font-display font-semibold text-xs text-[#F59E0B] transition-colors whitespace-nowrap cursor-pointer"
+                    >
+                      PLAYER PACKS
+                    </button>
+
+                    <button
+                      onClick={() => navigateTo('profile')}
+                      className="py-3 px-4 bg-[#111722]/90 hover:bg-[#192231] border border-white/15 rounded-xl font-display font-semibold text-xs text-[#38BDF8] transition-colors whitespace-nowrap cursor-pointer"
+                    >
+                      PLAYER PROFILE
+                    </button>
+                  </div>
+                </div>
+
+                {/* Right 5 Cols: DREAM SQUAD & MARKET SHOWCASE CARD */}
+                <div className="lg:col-span-5">
+                  <div className="bg-[#111722]/95 backdrop-blur-xl border border-white/15 rounded-2xl p-6 space-y-4 shadow-2xl">
+                    <div className="flex items-center justify-between border-b border-white/10 pb-3.5">
+                      <div>
+                        <div className="text-xs font-mono text-[#F59E0B] flex items-center gap-1.5">
+                          <Sparkles className="w-3.5 h-3.5 text-[#F59E0B]" />
+                          ACTIVE CLUB & LEAD SUPERSTAR
+                        </div>
+                        <h2 className="font-display text-xl font-bold text-white">
+                          {userTeam.name} ({userFormation})
+                        </h2>
+                      </div>
+                      <div className="px-3 py-1.5 rounded-lg bg-[#070A0E] border border-[#F59E0B]/40 font-mono text-xs font-bold text-[#F59E0B] flex items-center gap-1.5">
+                        <Coins className="w-3.5 h-3.5" />
+                        {coins.toLocaleString()} Coins
+                      </div>
+                    </div>
+
+                    {/* Active Lead Superstar Preview */}
+                    {(() => {
+                      const star = boostedUserSquad[9] || allPlayers[0];
+                      return (
+                        <div className="p-4 rounded-xl bg-[#070A0E] border border-white/10 flex items-center gap-4">
+                          <PlayerPhotoAvatar
+                            player={star}
+                            className="w-20 h-20 rounded-xl border border-[#F59E0B]/50 shrink-0 shadow-lg"
+                            showPositionBadge={true}
+                            showRatingBadge={true}
+                          />
+                          <div className="flex-1 min-w-0 space-y-1.5">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-display text-lg font-bold text-white truncate">
+                                {star.name}
+                              </span>
+                              <span className="text-[11px] font-mono font-bold text-[#10B981]">
+                                {star.rarity.toUpperCase()}
+                              </span>
+                            </div>
+                            <div className="text-xs text-slate-400">
+                              {star.nationality} · {star.club} · #{star.number}
+                            </div>
+                            <div className="grid grid-cols-4 gap-1.5 pt-1 font-mono text-[11px]">
+                              <div className="bg-[#111722] rounded px-2 py-1 text-center">
+                                <span className="text-slate-400 block text-[9px]">SPD</span>
+                                <span className="text-[#10B981] font-bold">{star.attributes.pace}</span>
+                              </div>
+                              <div className="bg-[#111722] rounded px-2 py-1 text-center">
+                                <span className="text-slate-400 block text-[9px]">SHO</span>
+                                <span className="text-[#F59E0B] font-bold">{star.attributes.shooting}</span>
+                              </div>
+                              <div className="bg-[#111722] rounded px-2 py-1 text-center">
+                                <span className="text-slate-400 block text-[9px]">PAS</span>
+                                <span className="text-[#38BDF8] font-bold">{star.attributes.passing}</span>
+                              </div>
+                              <div className="bg-[#111722] rounded px-2 py-1 text-center">
+                                <span className="text-slate-400 block text-[9px]">DRI</span>
+                                <span className="text-white font-bold">{star.attributes.dribbling}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Quick Squad & Market Actions */}
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <button
+                        onClick={() => navigateTo('transfer_market')}
+                        className="py-2.5 px-3 bg-[#F59E0B]/15 hover:bg-[#F59E0B] text-[#F59E0B] hover:text-[#070A0E] border border-[#F59E0B]/40 rounded-xl font-display font-bold text-xs transition-colors cursor-pointer"
+                      >
+                        BUY PLAYERS IN MARKET
+                      </button>
+                      <button
+                        onClick={() => navigateTo('upgrades')}
+                        className="py-2.5 px-3 bg-[#EC4899]/15 hover:bg-[#EC4899] text-[#EC4899] hover:text-white border border-[#EC4899]/40 rounded-xl font-display font-bold text-xs transition-colors cursor-pointer"
+                      >
+                        UPGRADE PLAYER STATS
+                      </button>
+                    </div>
+
+                    <button
+                      onClick={() => handleLaunchMatch('quick_match', awayTeam)}
+                      className="w-full py-3.5 bg-[#10B981] hover:bg-[#059669] text-[#070A0E] font-display font-bold text-xs sm:text-sm rounded-xl transition-colors flex items-center justify-center gap-2 shadow-lg cursor-pointer"
+                    >
+                      <Play className="w-4 h-4 fill-current" />
+                      KICK OFF 3D STADIUM MATCH ({userTeam.shortName} VS {awayTeam.shortName})
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            {/* ALL PLAYABLE MATCH MODES SECTION */}
+            <section className="max-w-7xl mx-auto px-6">
+              <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-6">
+                <div>
+                  <div className="text-xs font-mono text-[#10B981] mb-1">
+                    {MATCH_MODES.length} PLAYABLE 3D GAMEPLAY MODES
+                  </div>
+                  <h2 className="font-display text-2xl sm:text-3xl font-bold text-white">
+                    SELECT YOUR MATCH MODE
+                  </h2>
+                </div>
+                <div className="text-xs text-slate-400">
+                  Click any mode to jump directly into 3D stadium gameplay
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+                {/* DEDICATED REAL-TIME ONLINE MULTIPLAYER MATCH CARD */}
+                <div className="bg-gradient-to-b from-[#192231] to-[#070A0E] border-2 border-[#38BDF8] hover:border-[#38BDF8]/80 rounded-2xl p-6 flex flex-col justify-between transition-all shadow-[0_0_30px_rgba(56,189,248,0.2)] relative overflow-hidden">
+                  <div className="absolute top-0 right-0 bg-[#38BDF8] text-[#070A0E] text-[10px] font-mono font-bold px-3 py-1 rounded-bl-xl uppercase tracking-wider flex items-center gap-1">
+                    <Wifi className="w-3 h-3 animate-pulse" />
+                    MULTIPLAYER
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between text-xs text-slate-400 font-mono mb-2">
+                      <span className="text-[#38BDF8] font-bold">1v1 & 11v11 · Real-Time</span>
+                      <span className="text-[#F59E0B]">+8,000 Coins</span>
+                    </div>
+                    <h3 className="font-display text-xl font-bold text-white mb-1">
+                      Online Match (Room Code)
+                    </h3>
+                    <div className="text-xs text-[#38BDF8] font-medium mb-3">
+                      Play Against Real Players Online
+                    </div>
+                    <p className="text-xs text-slate-300 leading-relaxed mb-6">
+                      Play against another real player online using the fast Username + Room Code system. 60 FPS real-time sync with automatic match kick-off as soon as both players connect.
+                    </p>
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      SoundEngine.playUIClick();
+                      setShowOnlineMatchModal(true);
+                    }}
+                    className="w-full py-2.5 bg-[#38BDF8] hover:bg-[#0284C7] text-[#070A0E] font-display font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-[#38BDF8]/20"
+                  >
+                    <Play className="w-3.5 h-3.5 fill-current" />
+                    PLAY ONLINE MATCH
+                  </button>
+                </div>
+
+                {MATCH_MODES.map((m) => (
+                  <div
+                    key={m.id}
+                    className="bg-[#111722] border border-white/10 hover:border-[#10B981]/50 rounded-2xl p-6 flex flex-col justify-between transition-all"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between text-xs text-slate-400 font-mono mb-2">
+                        <span>
+                          {m.playersPerSide} · {m.durationLabel}
+                        </span>
+                        <span className="text-[#F59E0B]">+{m.rewardCoins.toLocaleString()} Coins</span>
+                      </div>
+                      <h3 className="font-display text-xl font-bold text-white mb-1">
+                        {m.title}
+                      </h3>
+                      <div className="text-xs text-[#10B981] font-medium mb-3">{m.subtitle}</div>
+                      <p className="text-xs text-slate-300 leading-relaxed mb-6">
+                        {m.description}
+                      </p>
+                    </div>
+
+                    <button
+                      onClick={() => handleLaunchMatch(m.id)}
+                      className="w-full py-2.5 bg-white/10 hover:bg-[#10B981] text-white hover:text-[#070A0E] font-display font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <Play className="w-3.5 h-3.5 fill-current" />
+                      LAUNCH {m.title.toUpperCase()}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            {/* CONTROLS & STADIUM ATMOSPHERE OVERVIEW */}
+            <section className="max-w-7xl mx-auto px-6">
+              <div className="bg-[#111722] border border-white/10 rounded-2xl p-8 grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+                <div className="lg:col-span-5 space-y-3">
+                  <div className="text-xs font-mono text-[#38BDF8]">
+                    PRECISION KEYBOARD + MOUSE HYBRID CONTROLS
+                  </div>
+                  <h2 className="font-display text-2xl sm:text-3xl font-bold text-white">
+                    Instant To Learn, Deep Mastery On The Pitch
+                  </h2>
+                  <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+                    Control your footballers with responsive keyboard movement while using the mouse to aim short passes, through balls, lofted crosses, power shots, finesse curlers, chip shots, and overhead volleys.
+                  </p>
+                  <div className="pt-2">
+                    <button
+                      onClick={() => navigateTo('settings')}
+                      className="px-4 py-2.5 bg-white/10 hover:bg-white/15 text-xs font-display font-bold text-white rounded-lg transition-colors cursor-pointer"
+                    >
+                      CUSTOMIZE KEYBINDINGS & CAMERA
+                    </button>
+                  </div>
+                </div>
+
+                <div className="lg:col-span-7 grid grid-cols-2 sm:grid-cols-3 gap-3 font-mono text-xs">
+                  {[
+                    { key: 'P / E', action: 'Short & Through Pass', sub: 'Pinpoint Pass / Through Ball' },
+                    { key: 'S', action: 'Normal & Power Shot', sub: 'Hold for Power Bar Timing' },
+                    { key: 'C / L', action: 'Finesse & Chip Shot', sub: 'Magnus Curl / Lob Keeper' },
+                    { key: 'B', action: 'Volley & Overhead Kick', sub: 'Acrobatic Aerial Finish' },
+                    { key: 'F / K', action: 'Rainbow Flick & Skills', sub: 'Stepovers, Roulette, Fake Shot' },
+                    { key: 'O', action: 'Lofted Cross / Header', sub: 'Whipped Cross Into The Box' },
+                    { key: 'I', action: 'Sprint Boost', sub: 'Explosive Pace Breakaway' },
+                    { key: 'W / A / S / D', action: '360° Movement', sub: 'Natural Stride & Turning' },
+                    { key: 'V / Q', action: 'GK Dive & Switch', sub: 'Manual GK Save / Switch Player' },
+                  ].map((ctrl) => (
+                    <div
+                      key={ctrl.key}
+                      className="p-3.5 bg-[#070A0E] border border-white/10 rounded-xl"
+                    >
+                      <div className="text-[#10B981] font-bold text-sm mb-1">[{ctrl.key}]</div>
+                      <div className="font-sans font-semibold text-white text-xs">
+                        {ctrl.action}
+                      </div>
+                      <div className="font-sans text-[11px] text-slate-400 mt-0.5">{ctrl.sub}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </section>
+          </div>
+        )}
+
+        {/* SCREEN 2: PLAY NOW / QUICK MATCH 3-STEP SETUP LOBBY */}
+        {screen === 'play_setup' && (
+          <div className="max-w-7xl mx-auto px-6 py-8 space-y-8">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-white/10 pb-6">
+              <div>
+                <div className="text-xs font-mono text-[#10B981] mb-1">
+                  STEP 1: SELECT TEAMS · STEP 2: SELECT MODE & STADIUM · STEP 3: KICK OFF
+                </div>
+                <h1 className="font-display text-3xl md:text-4xl font-bold text-white">
+                  MATCH SETUP LOBBY
+                </h1>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => {
+                    SoundEngine.playUIClick();
+                    setShowOnlineMatchModal(true);
+                  }}
+                  className="px-5 py-4 bg-[#38BDF8]/15 hover:bg-[#38BDF8]/25 text-[#38BDF8] border border-[#38BDF8]/40 font-display font-bold text-sm rounded-xl transition-all flex items-center gap-2 shadow-lg cursor-pointer whitespace-nowrap"
+                >
+                  <Globe className="w-4 h-4" />
+                  ONLINE MATCH (ROOM CODE)
+                </button>
+
+                <button
+                  onClick={() => handleLaunchMatch(selectedMode, awayTeam)}
+                  className="px-8 py-4 bg-[#10B981] hover:bg-[#059669] text-[#070A0E] font-display font-bold text-base rounded-xl transition-all flex items-center gap-2 shadow-xl whitespace-nowrap cursor-pointer"
+                >
+                  <Play className="w-5 h-5 fill-current" />
+                  START 3D MATCH NOW
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+              {/* Step 1: Select Home Team & Away Opponent */}
+              <div className="lg:col-span-7 space-y-6">
+                <div className="bg-[#111722] border border-white/10 rounded-2xl p-6">
+                  <h2 className="font-display text-xl font-bold text-white mb-4">
+                    1. Choose Your Team & Opponent
+                  </h2>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-6">
+                    {/* Home Team Card */}
+                    <div className="p-4 rounded-xl bg-[#070A0E] border border-[#10B981]/50">
+                      <div className="text-xs font-mono text-[#10B981] mb-2">
+                        YOUR TEAM (HOME)
+                      </div>
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2.5">
+                          <span
+                            className="w-5 h-5 rounded-sm border border-white/20"
+                            style={{ backgroundColor: userTeam.primaryColor }}
+                          />
+                          <span className="font-display text-xl font-bold text-white">
+                            {userTeam.name}
+                          </span>
+                        </div>
+                        <span className="font-mono text-sm font-bold text-[#F59E0B]">
+                          OVR {userTeam.rating}
+                        </span>
+                      </div>
+                      <select
+                        value={userTeam.id}
+                        onChange={(e) => {
+                          const found = TEAMS_DB.find((t) => t.id === e.target.value);
+                          if (found) setUserTeam(found);
+                        }}
+                        className="w-full bg-[#111722] border border-white/15 rounded-lg px-3 py-2 text-xs text-white"
+                      >
+                        {TEAMS_DB.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.name} ({t.category} · OVR {t.rating})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Away Team Card */}
+                    <div className="p-4 rounded-xl bg-[#070A0E] border border-white/15">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-mono text-[#F59E0B]">
+                          OPPONENT TEAM (AWAY)
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            SoundEngine.playUIClick();
+                            setInspectedOpponentSquad({
+                              username: awayTeam.name,
+                              clubName: awayTeam.name,
+                              clubPrimaryColor: awayTeam.primaryColor,
+                              clubSecondaryColor: awayTeam.secondaryColor,
+                              formation: awayTeam.defaultFormation || '4-3-3',
+                            });
+                          }}
+                          className="px-2 py-0.5 rounded bg-[#38BDF8]/15 hover:bg-[#38BDF8]/25 border border-[#38BDF8]/40 text-[#38BDF8] font-mono text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+                        >
+                          <Eye className="w-3 h-3" />
+                          VIEW SQUAD (XI)
+                        </button>
+                      </div>
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2.5">
+                          <span
+                            className="w-5 h-5 rounded-sm border border-white/20"
+                            style={{ backgroundColor: awayTeam.primaryColor }}
+                          />
+                          <span className="font-display text-xl font-bold text-white">
+                            {awayTeam.name}
+                          </span>
+                        </div>
+                        <span className="font-mono text-sm font-bold text-[#F59E0B]">
+                          OVR {awayTeam.rating}
+                        </span>
+                      </div>
+                      <select
+                        value={awayTeam.id}
+                        onChange={(e) => {
+                          const found = TEAMS_DB.find((t) => t.id === e.target.value);
+                          if (found) setAwayTeam(found);
+                        }}
+                        className="w-full bg-[#111722] border border-white/15 rounded-lg px-3 py-2 text-xs text-white"
+                      >
+                        {TEAMS_DB.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.name} ({t.category} · OVR {t.rating})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Select Match Mode */}
+                  <h3 className="font-display text-lg font-bold text-white mb-3">
+                    2. Select Match Mode
+                  </h3>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 mb-6">
+                    {MATCH_MODES.map((m) => (
+                      <button
+                        key={m.id}
+                        onClick={() => {
+                          SoundEngine.playUIClick();
+                          setSelectedMode(m.id);
+                        }}
+                        className={`p-3 rounded-xl border text-left transition-all ${
+                          selectedMode === m.id
+                            ? 'bg-[#192231] border-[#10B981]'
+                            : 'bg-[#070A0E] border-white/10 hover:border-white/25'
+                        }`}
+                      >
+                        <div className="font-display font-bold text-xs text-white mb-0.5">
+                          {m.title}
+                        </div>
+                        <div className="text-[11px] font-mono text-slate-400">
+                          {m.playersPerSide}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Select Lead Star From Unlocked World Cup Players + Unlock Legends */}
+                  <div className="pt-5 border-t border-white/10 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="font-display text-lg font-bold text-white">
+                          3. Select Your Lead World Cup Footballer (YOU: {userSquad[9]?.name})
+                        </h3>
+                        <p className="text-xs text-slate-400">
+                          Showing your {unlockedPlayerIds.length} currently unlocked players. Unlock more World Cup legends below with Coins!
+                        </p>
+                      </div>
+                      <span className="font-mono text-xs text-[#F59E0B] font-bold">
+                        {coins.toLocaleString()} Coins
+                      </span>
+                    </div>
+
+                    {/* Unlocked Players (Realistic eFootball Player Photos on Player Selection Screen) */}
+                    <div className="grid grid-cols-3 sm:grid-cols-5 gap-2.5">
+                      {allPlayers.filter((p) => unlockedPlayerIds.includes(p.id)).map(
+                        (p) => {
+                          const existingSlotIdx = userSquad
+                            .slice(0, 11)
+                            .findIndex((item) => item.id === p.id);
+                          const isStarting = existingSlotIdx >= 0;
+                          const slotLabel = isStarting
+                            ? FORMATIONS[userFormation][existingSlotIdx]?.label || p.position
+                            : FORMATIONS[userFormation][
+                                findBestSlotIndexForPlayer(p, userFormation, userSquad)
+                              ]?.label || p.position;
+                          return (
+                            <button
+                              key={p.id}
+                              title={`${p.name} (${p.position} · OVR ${p.rating})`}
+                              onClick={() => {
+                                SoundEngine.playUIClick();
+                                setUserSquad((prev) =>
+                                  placeNewPlayerInMatchingPosition(prev, p, userFormation)
+                                );
+                              }}
+                              className={`p-2 rounded-xl border flex flex-col items-center text-center transition-all cursor-pointer ${
+                                isStarting
+                                  ? 'bg-[#192231] border-[#10B981] ring-2 ring-[#10B981]'
+                                  : 'bg-[#070A0E] border-white/10 hover:border-white/30'
+                              }`}
+                            >
+                              <PlayerPhotoAvatar
+                                player={p}
+                                className="w-15 h-15 rounded-xl border border-white/20 shadow-md"
+                                showPositionBadge={true}
+                                showRatingBadge={true}
+                              />
+                              <div className="text-xs font-sans font-bold text-white truncate mt-1.5 w-full leading-tight">
+                                {p.name}
+                              </div>
+                              <div className="text-[10px] font-mono mt-0.5 truncate w-full">
+                                {isStarting ? (
+                                  <span className="text-[#10B981] font-bold">
+                                    ✓ ACTIVE ({slotLabel})
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-300">
+                                    + PLACE AT {slotLabel}
+                                  </span>
+                                )}
+                              </div>
+                            </button>
+                          );
+                        }
+                      )}
+                    </div>
+
+                    {/* Locked World Cup Superstars (Messi, Mbappé, Ronaldo, Neymar, etc.) */}
+                    {allPlayers.some((p) => !unlockedPlayerIds.includes(p.id)) && (
+                      <div>
+                        <div className="text-xs font-mono text-[#F59E0B] font-bold mb-2">
+                          UNLOCK FAMOUS WORLD CUP STARS WITH IN-GAME MONEY:
+                        </div>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                          {allPlayers.filter((p) => !unlockedPlayerIds.includes(p.id))
+                            .slice(0, 8)
+                            .map((star) => {
+                              const canAfford = coins >= star.price;
+                              return (
+                                <button
+                                  key={star.id}
+                                  disabled={!canAfford}
+                                  title={`${star.name} (${star.position} · OVR ${star.rating})`}
+                                  onClick={() => handleBuyPlayer(star)}
+                                  className={`p-2.5 rounded-xl border flex flex-col items-center text-center transition-all ${
+                                    canAfford
+                                      ? 'bg-[#070A0E] border-[#F59E0B]/40 hover:border-[#F59E0B] cursor-pointer'
+                                      : 'bg-[#070A0E]/50 border-white/5 opacity-60 cursor-not-allowed'
+                                  }`}
+                                >
+                                  <PlayerPhotoAvatar
+                                    player={star}
+                                    className="w-13 h-13 rounded-xl border border-[#F59E0B]/40"
+                                    showPositionBadge={true}
+                                    showRatingBadge={true}
+                                  />
+                                  <div className="text-xs font-sans font-bold text-white truncate w-full mt-1.5 leading-tight">
+                                    {star.name}
+                                  </div>
+                                  <div className="text-[10px] font-mono text-[#F59E0B] font-bold mt-0.5">
+                                    {star.position} · OVR {star.rating}
+                                  </div>
+                                  <div className="text-[10px] text-slate-400 truncate w-full">
+                                    {star.nationality}
+                                  </div>
+                                  <div className="text-[10px] font-mono text-[#10B981] font-bold mt-0.5">
+                                    {star.price.toLocaleString()} Coins
+                                  </div>
+                                </button>
+                              );
+                            })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Step 2: Stadium, Weather, Camera & Difficulty */}
+              <div className="lg:col-span-5 space-y-6">
+                <div className="bg-[#111722] border border-white/10 rounded-2xl p-6 space-y-5">
+                  <h2 className="font-display text-xl font-bold text-white">
+                    3. Stadium, Weather & AI Difficulty
+                  </h2>
+
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-2">
+                      3D Stadium Arena (8 Themes)
+                    </label>
+                    <select
+                      value={selectedStadium.id}
+                      onChange={(e) => {
+                        const st = STADIUMS.find((s) => s.id === e.target.value);
+                        if (st) {
+                          setSelectedStadium(st);
+                          setSelectedWeather(st.defaultWeather);
+                        }
+                      }}
+                      className="w-full bg-[#070A0E] border border-white/15 rounded-lg px-3 py-2.5 text-xs text-white font-medium"
+                    >
+                      {STADIUMS.map((st) => (
+                        <option key={st.id} value={st.id}>
+                          {st.name} · Capacity {st.capacity.toLocaleString()}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[11px] text-slate-400 mt-1.5">
+                      {selectedStadium.description}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-2">
+                      Weather Conditions
+                    </label>
+                    <div className="grid grid-cols-4 gap-2">
+                      {(['Sunny', 'Night', 'Cloudy', 'Rain'] as WeatherType[]).map((w) => (
+                        <button
+                          key={w}
+                          onClick={() => setSelectedWeather(w)}
+                          className={`py-2 rounded-lg text-xs font-semibold transition-colors ${
+                            selectedWeather === w
+                              ? 'bg-[#38BDF8] text-[#070A0E] font-bold'
+                              : 'bg-[#070A0E] text-slate-300 border border-white/10'
+                          }`}
+                        >
+                          {w}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-2">AI Difficulty</label>
+                    <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                      {(
+                        ['Easy', 'Normal', 'Hard', 'Professional', 'World Class'] as DifficultyLevel[]
+                      ).map((d) => (
+                        <button
+                          key={d}
+                          onClick={() => setDifficulty(d)}
+                          className={`py-2 rounded-lg text-xs font-semibold transition-colors ${
+                            difficulty === d
+                              ? 'bg-[#F59E0B] text-[#070A0E] font-bold'
+                              : 'bg-[#070A0E] text-slate-300 border border-white/10'
+                          }`}
+                        >
+                          {d}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-2">Camera Perspective</label>
+                    <div className="grid grid-cols-5 gap-1.5">
+                      {(['Broadcast', 'Player', 'Action', 'Goalkeeper', 'Free'] as CameraMode[]).map(
+                        (cam) => (
+                          <button
+                            key={cam}
+                            onClick={() => setCameraMode(cam)}
+                            className={`py-2 rounded-lg text-[11px] font-semibold transition-colors ${
+                              cameraMode === cam
+                                ? 'bg-[#10B981] text-[#070A0E] font-bold'
+                                : 'bg-[#070A0E] text-slate-300 border border-white/10'
+                            }`}
+                          >
+                            {cam}
+                          </button>
+                        )
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-2">
+                      Auto Player Switch Option
+                    </label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {(
+                        [
+                          { id: 'auto', label: 'Auto Switch' },
+                          { id: 'air_balls', label: 'Air Balls Only' },
+                          { id: 'manual', label: 'Manual [Q]' },
+                        ] as { id: AutoSwitchMode; label: string }[]
+                      ).map((opt) => (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => {
+                            SoundEngine.playUIClick();
+                            setAutoSwitchMode(opt.id);
+                          }}
+                          className={`py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                            autoSwitchMode === opt.id
+                              ? 'bg-[#10B981] text-[#070A0E] font-bold'
+                              : 'bg-[#070A0E] text-slate-300 border border-white/10'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* SCREEN 3 & 4: WORLD CUP & TOURNAMENTS */}
+        {(screen === 'world_cup' || screen === 'tournaments') && (
+          <WorldCupAndTournaments
+            initialTab={screen === 'world_cup' ? 'world_cup' : 'tournaments'}
+            userTeam={userTeam}
+            userFormation={userFormation}
+            userSquad={boostedUserSquad}
+            allUnlockedPlayers={allPlayers.filter((p) => unlockedPlayerIds.includes(p.id))}
+            onSelectUserTeam={setUserTeam}
+            onSelectFormation={(nextFormation) => {
+              setUserFormation(nextFormation);
+              const unlockedPool = allPlayers.filter((p) => unlockedPlayerIds.includes(p.id));
+              setUserSquad((prev) =>
+                buildOptimalSquadForFormation(unlockedPool, prev, nextFormation)
+              );
+            }}
+            onUpdateSquadOrder={setUserSquad}
+            tournamentStageIndex={tournamentStageIndex}
+            onStartTournamentMatch={({ opponent, stageLabel, isFinal }) => {
+              if (isFinal) {
+                setSelectedStadium(STADIUMS[4]); // Crown of Champions Final Stadium
+                setSelectedWeather('Night');
+              }
+              handleLaunchMatch('world_cup', opponent, stageLabel);
+            }}
+            onAdvanceStageSimulation={() => {
+              SoundEngine.playGoalRoar();
+              setTournamentStageIndex((idx) => Math.min(7, idx + 1));
+              setCoins((c) => c + 4000);
+            }}
+            onResetTournament={() => {
+              SoundEngine.playUIClick();
+              setTournamentStageIndex(0);
+            }}
+          />
+        )}
+
+        {/* SCREEN 5, 6, 7, 7B: MY TEAM (DREAM TEAM 11V11), PLAYER MARKET, UPGRADES, 50-STAR SPIN & PLAYER PACKS */}
+        {(screen === 'my_team' ||
+          screen === 'transfer_market' ||
+          screen === 'upgrades' ||
+          screen === 'packs' ||
+          screen === 'spin_roulette') && (
+          <MyTeamAndMarket
+            initialSection={screen}
+            coins={coins}
+            walletRupees={walletRupees}
+            onSpendRupees={handleSpendRupees}
+            userTeam={userTeam}
+            userFormation={userFormation}
+            userSquad={boostedUserSquad}
+            allPlayers={allPlayers}
+            unlockedPlayerIds={unlockedPlayerIds}
+            captainId={captainId}
+            preferredCelebration={preferredCelebration}
+            onSelectTeam={setUserTeam}
+            onSelectFormation={(nextFormation) => {
+              setUserFormation(nextFormation);
+              const unlockedPool = allPlayers.filter((p) => unlockedPlayerIds.includes(p.id));
+              setUserSquad((prev) =>
+                buildOptimalSquadForFormation(unlockedPool, prev, nextFormation)
+              );
+            }}
+            onUpdateSquadOrder={setUserSquad}
+            onSelectCaptain={setCaptainId}
+            onSelectCelebration={setPreferredCelebration}
+            onBuyPlayer={handleBuyPlayer}
+            onApplyUpgradeCard={handleApplyUpgradeCard}
+            onOpenPack={handleOpenPack}
+            onSpinRoulette={handleSpinRoulette}
+            onPlayDreamTeamOffline={() => {
+              handleLaunchMatch('quick_match', awayTeam);
+            }}
+            onPlayDreamTeamOnline={() => {
+              SoundEngine.playUIClick();
+              setShowOnlineMatchModal(true);
+            }}
+            onQuickMatchDreamTeamOnline={() => {
+              SoundEngine.playUIClick();
+              setShowOnlineMatchModal(true);
+            }}
+            onJoinDreamTeamRoomCode={() => {
+              SoundEngine.playUIClick();
+              setShowOnlineMatchModal(true);
+            }}
+            onTriggerPaymentCheckout={(item) => setCheckoutItem(item)}
+          />
+        )}
+
+        {/* SCREEN 7C: 3D SHOOTING & WEAPONS ARMORY HUB */}
+        {screen === 'armory_hub' && (
+          <ArmoryAndShooterHub
+            coins={coins}
+            unlockedPlayerIds={unlockedPlayerIds}
+            userSquad={userSquad}
+            allPlayers={allPlayers}
+            unlockedWeaponIds={unlockedWeaponIds}
+            selectedWeaponId={selectedWeaponId}
+            selectedArenaId={selectedShooterArenaId}
+            selectedOperativeId={selectedOperativeId}
+            weaponUpgradeLevels={weaponUpgradeLevels}
+            onUnlockWeapon={(weaponToUnlock) => {
+              if (coins < weaponToUnlock.price) return;
+              setCoins((c) => c - weaponToUnlock.price);
+              setUnlockedWeaponIds((prev) =>
+                prev.includes(weaponToUnlock.id) ? prev : [...prev, weaponToUnlock.id]
+              );
+              setSelectedWeaponId(weaponToUnlock.id);
+            }}
+            onSelectWeapon={(wpnId) => setSelectedWeaponId(wpnId)}
+            onUpgradeWeapon={(wpnId, cost) => {
+              if (coins < cost) return;
+              setCoins((c) => c - cost);
+              setWeaponUpgradeLevels((prev) => ({
+                ...prev,
+                [wpnId]: (prev[wpnId] || 1) + 1,
+              }));
+            }}
+            onSelectArena={(arenaId) => setSelectedShooterArenaId(arenaId)}
+            onSelectOperative={(playerId) => setSelectedOperativeId(playerId)}
+            onLaunchShooterMatch={() => setScreen('shooter_match')}
+            onGoToMarket={() => setScreen('transfer_market')}
+          />
+        )}
+
+        {/* SCREEN 8, 9, 10: PROFILE, LEADERBOARD & SETTINGS */}
+        {(screen === 'profile' || screen === 'leaderboard' || screen === 'settings') && (
+          <ProfileLeaderboardSettings
+            activeSection={screen}
+            profile={profile}
+            favoriteTeam={userTeam}
+            bestPlayer={userSquad[0] || PLAYERS_DB[0]}
+            onUpdateUsername={(username) => setProfile((prev) => ({ ...prev, username }))}
+            graphicsQuality={graphicsQuality}
+            onChangeGraphics={setGraphicsQuality}
+            cameraMode={cameraMode}
+            onChangeCamera={setCameraMode}
+            controlScheme={controlScheme}
+            onChangeControlScheme={setControlScheme}
+            difficulty={difficulty}
+            onChangeDifficulty={setDifficulty}
+            mouseSensitivity={mouseSensitivity}
+            onChangeMouseSens={setMouseSensitivity}
+            cameraSensitivity={cameraSensitivity}
+            onChangeCameraSens={setCameraSensitivity}
+            keyBindings={keyBindings}
+            onChangeKeyBindings={setKeyBindings}
+            autoSwitchMode={autoSwitchMode}
+            onChangeAutoSwitchMode={setAutoSwitchMode}
+          />
+        )}
+      </main>
+
+      {/* PRE-FIRST-MATCH CONTROL GUIDE MODAL (UX Requirement #37) */}
+      {showPreMatchGuide && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-[#111722] border border-[#10B981]/50 rounded-2xl max-w-lg w-full p-7 shadow-2xl">
+            <div className="text-xs font-mono text-[#10B981] mb-1">
+              READY FOR KICK-OFF · {userTeam.name.toUpperCase()} VS {awayTeam.name.toUpperCase()}
+            </div>
+            <h2 className="font-display text-2xl font-bold text-white mb-4">
+              QUICK CONTROL GUIDE
+            </h2>
+
+            <div className="mb-4 p-3 rounded-xl bg-[#070A0E] border border-white/10">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-display font-bold text-white tracking-wider">
+                  AUTO PLAYER SWITCH OPTION
+                </span>
+                <span className="text-[11px] font-mono text-[#10B981]">
+                  {autoSwitchMode === 'auto'
+                    ? 'AUTO (ALWAYS)'
+                    : autoSwitchMode === 'air_balls'
+                    ? 'AIR & LOOSE BALLS'
+                    : 'MANUAL ONLY [Q]'}
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {(
+                  [
+                    { id: 'auto', label: 'Auto Switch' },
+                    { id: 'air_balls', label: 'Air Balls Only' },
+                    { id: 'manual', label: 'Manual [Q]' },
+                  ] as { id: AutoSwitchMode; label: string }[]
+                ).map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => {
+                      SoundEngine.playUIClick();
+                      setAutoSwitchMode(opt.id);
+                    }}
+                    className={`py-2 px-2 rounded-lg text-xs font-display font-bold border transition-colors cursor-pointer ${
+                      autoSwitchMode === opt.id
+                        ? 'bg-[#10B981] text-[#070A0E] border-[#10B981]'
+                        : 'bg-[#111722] text-slate-300 border-white/10 hover:border-white/30'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2.5 font-mono text-xs text-slate-200 mb-6">
+              <div className="p-2.5 bg-[#070A0E] border border-white/10 rounded-lg">
+                <span className="text-[#10B981] font-bold">P</span> = Pass
+              </div>
+              <div className="p-2.5 bg-[#070A0E] border border-white/10 rounded-lg">
+                <span className="text-[#10B981] font-bold">S</span> = Shoot (Hold Power)
+              </div>
+              <div className="p-2.5 bg-[#070A0E] border border-[#F59E0B]/40 rounded-lg">
+                <span className="text-[#F59E0B] font-bold">B / F</span> = Rainbow Flick Skill
+              </div>
+              <div className="p-2.5 bg-[#070A0E] border border-white/10 rounded-lg">
+                <span className="text-[#38BDF8] font-bold">K</span> = Skill Move
+              </div>
+              <div className="p-2.5 bg-[#070A0E] border border-white/10 rounded-lg">
+                <span className="text-[#F59E0B] font-bold">C</span> = Curve Shot
+              </div>
+              <div className="p-2.5 bg-[#070A0E] border border-white/10 rounded-lg">
+                <span className="text-white font-bold">I</span> = Sprint
+              </div>
+              <div className="p-2.5 bg-[#070A0E] border border-white/10 rounded-lg">
+                <span className="text-white font-bold">R</span> = Press
+              </div>
+              <div className="p-2.5 bg-[#070A0E] border border-white/10 rounded-lg">
+                <span className="text-white font-bold">D / T</span> = Defend / Tackle
+              </div>
+              <div className="p-2.5 bg-[#070A0E] border border-white/10 rounded-lg">
+                <span className="text-white font-bold">W / O / A / D</span> = Movement
+              </div>
+              <div className="p-2.5 bg-[#070A0E] border border-white/10 rounded-lg">
+                <span className="text-white font-bold">Mouse</span> = Aim / Camera
+              </div>
+              <div className="p-2.5 bg-[#070A0E] border border-white/10 rounded-lg">
+                <span className="text-white font-bold">V</span> = Goalkeeper Save
+              </div>
+            </div>
+
+            <button
+              onClick={handleConfirmGuideAndStart}
+              className="w-full py-3.5 bg-[#10B981] hover:bg-[#059669] text-[#070A0E] font-display font-bold text-sm rounded-xl transition-colors flex items-center justify-center gap-2"
+            >
+              <Play className="w-4 h-4 fill-current" />
+              ENTER STADIUM & KICK OFF
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* GLOBAL MODALS: GOOGLE SIGN-IN AND APP PAYMENT CHECKOUT */}
+      <GoogleAuthModal
+        isOpen={showGoogleAuthModal}
+        currentUsername={profile.username}
+        currentClubId={userTeam.id}
+        unlockedPlayerIds={unlockedPlayerIds}
+        account={account}
+        onClose={() => setShowGoogleAuthModal(false)}
+        onSuccessAuth={(acc, token) => {
+          setAuthToken(token);
+          localStorage.setItem('fe_auth_token_v3', token);
+          applyServerUserProgress(acc);
+        }}
+        onLogout={() => {
+          setAccount(null);
+          setAuthToken(null);
+          localStorage.removeItem('fe_auth_token_v3');
+          localStorage.removeItem('fe_user_email_v3');
+          localStorage.removeItem('fe_saved_account_v3');
+        }}
+      />
+
+      <PaymentCheckoutModal
+        item={checkoutItem}
+        username={profile.username}
+        authToken={authToken}
+        onClose={() => setCheckoutItem(null)}
+        onPaymentSuccess={({ coinsAdded, playerUnlocked }) => {
+          if (coinsAdded > 0) {
+            setCoins((c) => c + coinsAdded);
+          }
+          if (playerUnlocked && !unlockedPlayerIds.includes(playerUnlocked.id)) {
+            setUnlockedPlayerIds((prev) => [...prev, playerUnlocked.id]);
+            setUserSquad((prev) =>
+              placeNewPlayerInMatchingPosition(prev, playerUnlocked, userFormation)
+            );
+          }
+        }}
+      />
+
+      <OnlineMatchModal
+        isOpen={showOnlineMatchModal}
+        onClose={() => setShowOnlineMatchModal(false)}
+        currentUsername={profile.username}
+        onUpdateUsername={(newName) => {
+          setProfile((prev) => ({ ...prev, username: newName }));
+          localStorage.setItem('fe_username', newName);
+        }}
+        userTeam={userTeam}
+        userSquad={boostedUserSquad}
+        userFormation={userFormation}
+        onLaunchMatch={handleLaunchOnlineMatch}
+      />
+
+      {inspectedOpponentSquad && (
+        <OpponentSquadPopup
+          isOpen={Boolean(inspectedOpponentSquad)}
+          onClose={() => setInspectedOpponentSquad(null)}
+          opponent={inspectedOpponentSquad}
+        />
+      )}
+
+      {/* In-Game Wallet & Equipment Locker Modal */}
+      <WalletAndLockerModal
+        isOpen={isWalletLockerOpen}
+        onClose={() => setIsWalletLockerOpen(false)}
+        walletRupees={walletRupees}
+        coins={coins}
+        onSpendRupees={handleSpendRupees}
+        onSpendCoins={handleSpendCoins}
+        unlockedBallIds={unlockedBallIds}
+        activeBallId={activeBallId}
+        onSelectBall={(ballId) => {
+          setActiveBallId(ballId);
+          try {
+            localStorage.setItem('fe_active_ball_v1', ballId);
+          } catch {}
+        }}
+        onUnlockBall={handleUnlockBall}
+        unlockedJerseyIds={unlockedJerseyIds}
+        activeJerseyId={activeJerseyId}
+        onSelectJersey={(jerseyId) => {
+          setActiveJerseyId(jerseyId);
+          try {
+            localStorage.setItem('fe_active_jersey_v1', jerseyId);
+          } catch {}
+        }}
+        onUnlockJersey={handleUnlockJersey}
+        unlockedBootsIds={unlockedBootsIds}
+        activeBootsId={activeBootsId}
+        onSelectBoots={(bootsId) => {
+          setActiveBootsId(bootsId);
+          try {
+            localStorage.setItem('fe_active_boots_v1', bootsId);
+          } catch {}
+        }}
+        onUnlockBoots={handleUnlockBoots}
+        preferredCelebration={preferredCelebration}
+        onSelectCelebration={(cel) => {
+          setPreferredCelebration(cel as CelebrationType);
+          try {
+            localStorage.setItem('fe_celebration', cel);
+          } catch {}
+        }}
+      />
+
+      {/* QUIET FOOTER */}
+      <footer className="border-t border-white/10 py-6 px-6 bg-[#070A0E] text-xs text-slate-400">
+        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div>
+            FOOTBALL ELITE: WORLD OF CHAMPIONS · Original 3D Browser Football Platform
+          </div>
+          <div className="flex items-center gap-6">
+            <button onClick={() => navigateTo('profile')} className="hover:text-white transition-colors">
+              Profile
+            </button>
+            <button onClick={() => navigateTo('leaderboard')} className="hover:text-white transition-colors">
+              Leaderboard
+            </button>
+            <button onClick={() => navigateTo('settings')} className="hover:text-white transition-colors">
+              Controls & Settings
+            </button>
+          </div>
+        </div>
+      </footer>
+    </div>
+  );
+}
